@@ -205,6 +205,61 @@ class RuntimeIdentityTests(unittest.TestCase):
                 e2e.junit_results(["dummy"], True)
 
 
+class CypressGateRevalidationTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        directory = Path(temporary.name)
+        first, last = directory / "junit-a.xml", directory / "junit-z.xml"
+        first.write_text('<testsuite><testcase name="return results for a valid keyword"/>'
+                         '<testcase name="shared name"/></testsuite>', encoding="utf-8")
+        last.write_text('<testsuite><testcase name="shared name"/></testsuite>', encoding="utf-8")
+        self.native = [first, last]
+        self.metadata = {"source_commit": "a" * 40, "run": {"id": "123", "attempt": "1"},
+                         "images": {service: {"image_id": "sha256:" + "b" * 64} for service in images.SERVICES}}
+        snapshot = {service: {"image_id": image["image_id"], "config_digest": image["image_id"]}
+                    for service, image in self.metadata["images"].items()}
+        self.evidence = {"status": "passed", "mode": "compose", "source_commit": self.metadata["source_commit"],
+                         "run": self.metadata["run"], "backend_profile": "upstream",
+                         "cypress": e2e.junit_results(list(reversed(self.native)), False),
+                         "identity_checks": [snapshot, copy.deepcopy(snapshot)],
+                         "orders_persistence": {"orders_before_restart": 1, "database_rows": 1,
+                                                "orders_after_restart": 1}}
+
+    def test_artifact_file_order_does_not_change_valid_test_evidence(self):
+        for mode in ("compose", "search", "kind"):
+            value = copy.deepcopy(self.evidence)
+            value["mode"] = mode
+            original = copy.deepcopy(value)
+            with self.subTest(mode=mode):
+                gate.validate_e2e(value, self.metadata, mode, self.native)
+                self.assertEqual(value, original)
+
+    def test_missing_extra_or_duplicated_names_still_fail(self):
+        for names in (["shared name"],
+                      ["shared name", "shared name", "return results for a valid keyword", "extra"],
+                      ["return results for a valid keyword", "return results for a valid keyword", "shared name"],
+                      "shared name", ["shared name", None]):
+            value = copy.deepcopy(self.evidence)
+            value["cypress"]["passed_test_names"] = names
+            with self.subTest(names=names), self.assertRaises(images.ContractError):
+                gate.validate_e2e(value, self.metadata, "compose", self.native)
+
+    def test_numeric_test_count_mismatches_still_fail(self):
+        for field in ("passed", "executed", "skipped"):
+            value = copy.deepcopy(self.evidence)
+            value["cypress"][field] += 1
+            with self.subTest(field=field), self.assertRaises(images.ContractError):
+                gate.validate_e2e(value, self.metadata, "compose", self.native)
+
+    def test_changed_native_results_still_fail(self):
+        for result in ("<failure/>", "<skipped/>"):
+            self.native[1].write_text('<testsuite><testcase name="shared name">' + result
+                                      + '</testcase></testsuite>', encoding="utf-8")
+            with self.subTest(result=result), self.assertRaises((images.ContractError, RuntimeError)):
+                gate.validate_e2e(self.evidence, self.metadata, "compose", self.native)
+
+
 class ImageContractTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()

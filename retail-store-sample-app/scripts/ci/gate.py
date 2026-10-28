@@ -43,7 +43,15 @@ def validate_e2e(evidence, metadata, mode, native):
             "Stale E2E evidence")
     require(evidence.get("backend_profile") == "upstream", "Unaccepted backend profile")
     counts = junit_results(native, mode == "search")
-    require(evidence.get("cypress") == counts, "Cypress evidence disagrees with native XML")
+    recorded = evidence.get("cypress")
+    require(isinstance(recorded, dict) and isinstance(recorded.get("passed_test_names"), list)
+            and all(isinstance(name, str) for name in recorded["passed_test_names"]),
+            "Malformed Cypress test names: " + mode)
+    # Artifact extraction can change file enumeration order. Compare the same
+    # test-name multiset, preserving duplicates and all numeric result counts.
+    recorded = dict(recorded, passed_test_names=sorted(recorded["passed_test_names"]))
+    counts["passed_test_names"] = sorted(counts["passed_test_names"])
+    require(recorded == counts, "Cypress evidence disagrees with native XML: " + mode)
     identities = evidence.get("identity_checks", [])
     require(len(identities) >= 2, "Missing before/after restart identity checks")
     for snapshot in identities:
