@@ -1,11 +1,31 @@
-name: "Setup env"
-description: "Install required environment components"
+name: Setup CI environment
+description: Install the requested tools from the app toolchain and immutable Yarn dependencies
+inputs:
+  working-directory:
+    description: App directory relative to github.workspace
+    default: retail-store-sample-app
+  tools:
+    description: Space-separated mise tools needed by this job
+    default: java node go jq
+  dependencies:
+    description: Whether to install root Yarn dependencies
+    default: "true"
 runs:
-  using: "composite"
+  using: composite
   steps:
-    - uses: jdx/mise-action@v3
-    - name: yarn install
+    - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3, verified
+      with:
+        working_directory: ${{ inputs.working-directory }}
+        install_args: ${{ inputs.tools }}
+        cache: "false"
+    - name: Enable Corepack for Node jobs
+      if: contains(inputs.tools, 'node')
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: corepack enable
+    - name: Install immutable root dependencies
+      if: inputs.dependencies == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
       run: |
-        corepack enable
-        yarn install
+        yarn install --immutable

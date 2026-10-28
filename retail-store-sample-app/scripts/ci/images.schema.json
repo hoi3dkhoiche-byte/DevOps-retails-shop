@@ -1,0 +1,173 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Complete verified upstream-profile Retail release",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "source_commit",
+    "run",
+    "platform",
+    "backend_profile",
+    "images"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "source_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "attempt", "url"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*$"
+        },
+        "attempt": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*$"
+        },
+        "url": {
+          "type": "string",
+          "pattern": "^https://.+/actions/runs/[1-9][0-9]*/attempts/[1-9][0-9]*$"
+        }
+      }
+    },
+    "platform": {
+      "const": "linux/amd64"
+    },
+    "backend_profile": {
+      "const": "upstream"
+    },
+    "images": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ui", "catalog", "cart", "checkout", "orders"],
+      "properties": {
+        "ui": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/image"
+            },
+            {
+              "properties": {
+                "repository": {
+                  "const": "docker.io/hmannnguye/devops-retails-shop"
+                },
+                "reference": {
+                  "type": "string",
+                  "pattern": "^docker\\.io/hmannnguye/devops-retails-shop@sha256:[0-9a-f]{64}$"
+                }
+              }
+            }
+          ]
+        },
+        "catalog": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/image"
+            },
+            {
+              "properties": {
+                "repository": {
+                  "const": "docker.io/hmannnguye/devops-retails-shop-catalog"
+                },
+                "reference": {
+                  "type": "string",
+                  "pattern": "^docker\\.io/hmannnguye/devops-retails-shop-catalog@sha256:[0-9a-f]{64}$"
+                }
+              }
+            }
+          ]
+        },
+        "cart": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/image"
+            },
+            {
+              "properties": {
+                "repository": {
+                  "const": "docker.io/hmannnguye/devops-retails-shop-cart"
+                },
+                "reference": {
+                  "type": "string",
+                  "pattern": "^docker\\.io/hmannnguye/devops-retails-shop-cart@sha256:[0-9a-f]{64}$"
+                }
+              }
+            }
+          ]
+        },
+        "checkout": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/image"
+            },
+            {
+              "properties": {
+                "repository": {
+                  "const": "docker.io/hmannnguye/devops-retails-shop-checkout"
+                },
+                "reference": {
+                  "type": "string",
+                  "pattern": "^docker\\.io/hmannnguye/devops-retails-shop-checkout@sha256:[0-9a-f]{64}$"
+                }
+              }
+            }
+          ]
+        },
+        "orders": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/image"
+            },
+            {
+              "properties": {
+                "repository": {
+                  "const": "docker.io/hmannnguye/devops-retails-shop-orders"
+                },
+                "reference": {
+                  "type": "string",
+                  "pattern": "^docker\\.io/hmannnguye/devops-retails-shop-orders@sha256:[0-9a-f]{64}$"
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "$defs": {
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "tag", "digest", "reference", "image_id"],
+      "properties": {
+        "repository": {
+          "type": "string"
+        },
+        "tag": {
+          "type": "string",
+          "pattern": "^sha-[0-9a-f]{40}-run-[1-9][0-9]*-[1-9][0-9]*$"
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "reference": {
+          "type": "string",
+          "pattern": "^docker\\.io/hmannnguye/[a-z0-9-]+@sha256:[0-9a-f]{64}$"
+        },
+        "image_id": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      }
+    }
+  }
+}

@@ -7,38 +7,44 @@
     "build": {
       "executor": "nx:run-commands",
       "cache": true,
-      "inputs": ["{projectRoot}/src/**/*", "{projectRoot}/pom.xml"],
+      "inputs": [
+        "default",
+        {
+          "runtime": "java --version"
+        }
+      ],
       "outputs": ["{projectRoot}/target/*.jar"],
       "options": {
-        "command": "./mvnw --no-transfer-progress -DskipTests package"
+        "command": "bash ./mvnw --batch-mode --no-transfer-progress -DskipTests package"
       }
     },
     "test": {
       "executor": "nx:run-commands",
       "dependsOn": ["build"],
-      "cache": true,
-      "inputs": ["{projectRoot}/src/**/*", "{projectRoot}/pom.xml"],
-      "outputs": ["{projectRoot}/target/surefire-reports/*.xml"],
+      "cache": false,
+      "inputs": ["default"],
+      "outputs": ["{projectRoot}/target/surefire-reports"],
       "options": {
-        "command": "./mvnw test -DexcludedGroups=integration"
+        "command": "bash ./mvnw --batch-mode --no-transfer-progress test -DexcludedGroups=integration -DfailIfNoTests=true"
       }
     },
     "test:integration": {
       "executor": "nx:run-commands",
-      "dependsOn": ["test"],
-      "cache": true,
-      "inputs": ["{projectRoot}/src/**/*", "{projectRoot}/pom.xml"],
-      "outputs": ["{projectRoot}/target/surefire-reports/*.xml"],
+      "dependsOn": ["build"],
+      "cache": false,
+      "inputs": ["default"],
+      "outputs": ["{projectRoot}/target/surefire-reports"],
       "options": {
-        "command": "./mvnw test -Dgroups=integration"
+        "command": "python3 ../../scripts/ci/checks.py unavailable --service ui --suite integration"
       }
     },
     "lint": {
       "executor": "nx:run-commands",
       "dependsOn": ["build"],
       "options": {
-        "command": "./mvnw checkstyle:checkstyle"
-      }
+        "command": "bash ./mvnw --batch-mode --no-transfer-progress checkstyle:checkstyle"
+      },
+      "cache": false
     },
     "serve": {
       "executor": "nx:run-commands",

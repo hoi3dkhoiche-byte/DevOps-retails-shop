@@ -7,36 +7,44 @@
     "build": {
       "executor": "nx:run-commands",
       "cache": true,
-      "inputs": ["{projectRoot}/src/**/*", "{projectRoot}/pom.xml"],
+      "inputs": [
+        "default",
+        {
+          "runtime": "java --version"
+        }
+      ],
       "outputs": ["{projectRoot}/target/*.jar"],
       "options": {
-        "command": "./mvnw --no-transfer-progress -DskipTests package"
+        "command": "bash ./mvnw --batch-mode --no-transfer-progress -DskipTests package"
       }
     },
     "test": {
       "executor": "nx:run-commands",
       "dependsOn": ["build"],
-      "cache": true,
-      "inputs": ["{projectRoot}/src/**/*", "{projectRoot}/pom.xml"],
+      "cache": false,
+      "inputs": ["default"],
       "options": {
-        "command": "./mvnw test -DexcludedGroups=integration"
-      }
+        "command": "bash ./mvnw --batch-mode --no-transfer-progress test -DexcludedGroups=integration -DfailIfNoTests=true"
+      },
+      "outputs": ["{projectRoot}/target/surefire-reports"]
     },
     "test:integration": {
       "executor": "nx:run-commands",
-      "dependsOn": ["test"],
-      "cache": true,
-      "inputs": ["{projectRoot}/src/**/*", "{projectRoot}/pom.xml"],
+      "dependsOn": ["build"],
+      "cache": false,
+      "inputs": ["default"],
       "options": {
-        "command": "AWS_ACCESS_KEY_ID='dummy' AWS_SECRET_ACCESS_KEY='dummy' ./mvnw test -Dgroups=integration"
-      }
+        "command": "AWS_ACCESS_KEY_ID='dummy' AWS_SECRET_ACCESS_KEY='dummy' bash ./mvnw --batch-mode --no-transfer-progress test -Dgroups=integration -DfailIfNoTests=true"
+      },
+      "outputs": ["{projectRoot}/target/surefire-reports"]
     },
     "lint": {
       "executor": "nx:run-commands",
       "dependsOn": ["build"],
       "options": {
-        "command": "./mvnw checkstyle:checkstyle"
-      }
+        "command": "bash ./mvnw --batch-mode --no-transfer-progress checkstyle:checkstyle"
+      },
+      "cache": false
     },
     "serve": {
       "executor": "nx:run-commands",

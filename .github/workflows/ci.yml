@@ -1,0 +1,321 @@
+name: Retail CI
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: retail-ci-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+    working-directory: retail-store-sample-app
+
+env:
+  CI: "true"
+  NX_DAEMON: "false"
+  PYTHONDONTWRITEBYTECODE: "1"
+  DOCKERHUB_NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE }}
+  TRIVY_VERSION: "0.67.2"
+  KIND_NODE_IMAGE: kindest/node:v1.35.0@sha256:452d707d4862f52530247495d180205e029056831160e22870e37e3f6c1ac31f
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      source_matrix: ${{ steps.plan.outputs.source_matrix }}
+      any_source: ${{ steps.plan.outputs.any_source }}
+      run_e2e: ${{ steps.plan.outputs.run_e2e }}
+      run_iac: ${{ steps.plan.outputs.run_iac }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, verified
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./retail-store-sample-app/.github/actions/setup-env
+        with:
+          tools: node go jq
+      - name: Test CI failure and evidence contracts
+        run: python3 -m unittest discover -s scripts/ci -p 'test_*.py' -v
+      - name: Select and verify affected projects
+        id: plan
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          base="$BASE_SHA"
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            base="$(git merge-base "$BASE_SHA" "$PR_HEAD_SHA")"
+          fi
+          python3 scripts/ci/plan.py --event "$GITHUB_EVENT_NAME" \
+            --head "$GITHUB_SHA" --base "$base" --output reports/plan.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4, verified
+        with:
+          name: plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: retail-store-sample-app/reports/plan.json
+          if-no-files-found: error
+          retention-days: 14
+
+  style:
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./retail-store-sample-app/.github/actions/setup-env
+        with:
+          tools: node go terraform helm actionlint
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4, verified
+        with:
+          name: plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: retail-store-sample-app/reports
+      - name: Semantic pull request title
+        if: github.event_name == 'pull_request'
+        uses: amannn/action-semantic-pull-request@e32d7e603df1aa1ba07e981f2a23455dee596825 # v5, verified
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: Paths, LF, formatting and Helm digest rendering
+        run: python3 scripts/ci/static_checks.py --plan reports/plan.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: style-${{ github.run_id }}-${{ github.run_attempt }}
+          path: retail-store-sample-app/reports/style
+          retention-days: 14
+
+  source:
+    needs: plan
+    if: needs.plan.outputs.any_source == 'true'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.source_matrix) }}
+    name: source-${{ matrix.service }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: ./retail-store-sample-app/.github/actions/setup-env
+        with:
+          tools: java node go jq
+      - name: Build, lint and count real test suites
+        env:
+          SERVICE: ${{ matrix.service }}
+        run: python3 scripts/ci/checks.py run --service "$SERVICE" --sha "$GITHUB_SHA" --timeout 1200
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: source-${{ matrix.service }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: retail-store-sample-app/reports/source
+          if-no-files-found: error
+          retention-days: 14
+
+  images:
+    needs: [plan, style, source]
+    if: needs.plan.outputs.any_source == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: ./retail-store-sample-app/.github/actions/setup-env
+        with:
+          tools: node go
+      - uses: ./retail-store-sample-app/.github/actions/setup-docker
+      - name: Build and archive all five amd64 images once
+        run: python3 scripts/ci/images.py build --directory dist/ci/images
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: image-archives-${{ github.run_id }}-${{ github.run_attempt }}
+          path: retail-store-sample-app/dist/ci/images
+          if-no-files-found: error
+          retention-days: 2
+          compression-level: 0
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: image-metadata-${{ github.run_id }}-${{ github.run_attempt }}
+          path: retail-store-sample-app/dist/ci/images/metadata.json
+          if-no-files-found: error
+          retention-days: 14
+
+  e2e:
+    needs: [plan, images]
+    if: needs.plan.outputs.run_e2e == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [compose, search, kind]
+    name: e2e-${{ matrix.mode }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: ./retail-store-sample-app/.github/actions/setup-env
+        with:
+          tools: node helm kubectl kind
+          dependencies: "false"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: image-archives-${{ github.run_id }}-${{ github.run_attempt }}
+          path: retail-store-sample-app/dist/ci/images
+      - name: Prepare disposable runner fixtures and Cypress libraries
+        run: |
+          sudo sysctl -w vm.max_map_count=262144
+          sudo apt-get update
+          sudo apt-get install --yes libgtk-3-0 libgbm1 libasound2t64 libnss3 libatk-bridge2.0-0 libxss1 xvfb xauth
+      - name: E2E, runtime image identity and order persistence
+        env:
+          MODE: ${{ matrix.mode }}
+        run: python3 scripts/ci/e2e.py --images dist/ci/images --mode "$MODE"
+      - name: Emergency cleanup after cancellation or job timeout
+        if: always()
+        env:
+          MODE: ${{ matrix.mode }}
+        run: |
+          name="retail-ci-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          if [[ "$MODE" == "kind" ]]; then
+            timeout 180 kind delete cluster --name "$name"
+          else
+            export DB_PASSWORD=ci-only-password
+            export CI_UI_IMAGE=unused CI_CATALOG_IMAGE=unused CI_CART_IMAGE=unused
+            export CI_CHECKOUT_IMAGE=unused CI_ORDERS_IMAGE=unused
+            timeout 120 docker compose --project-name "$name" -f src/app/docker-compose.yml \
+              -f src/app/compose.override.yaml -f src/app/compose.ci.yaml \
+              down --volumes --remove-orphans --timeout 30
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: e2e-${{ matrix.mode }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: retail-store-sample-app/dist/ci/reports/e2e
+          if-no-files-found: error
+          retention-days: 14
+
+  scan:
+    needs: [plan, images]
+    if: needs.plan.outputs.any_source == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: ./retail-store-sample-app/.github/actions/setup-env
+        with:
+          tools: trivy
+          dependencies: "false"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: image-archives-${{ github.run_id }}-${{ github.run_attempt }}
+          path: retail-store-sample-app/dist/ci/images
+      - name: Verify archive checksums and scan OS and library vulnerabilities
+        run: python3 scripts/ci/images.py scan --directory dist/ci/images
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: scan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: retail-store-sample-app/dist/ci/images/scan
+          if-no-files-found: error
+          retention-days: 14
+
+  ci-required:
+    name: ci-required
+    if: always()
+    needs: [plan, style, source, images, e2e, scan]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: retail-store-sample-app/reports
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        if: needs.plan.outputs.any_source == 'true'
+        with:
+          pattern: source-*-${{ github.run_id }}-${{ github.run_attempt }}
+          merge-multiple: true
+          path: retail-store-sample-app/reports/source
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        if: needs.plan.outputs.any_source == 'true'
+        with:
+          pattern: e2e-*-${{ github.run_id }}-${{ github.run_attempt }}
+          merge-multiple: true
+          path: retail-store-sample-app/reports/e2e
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        if: needs.plan.outputs.any_source == 'true'
+        with:
+          name: scan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: retail-store-sample-app/reports/scan
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        if: needs.plan.outputs.any_source == 'true'
+        with:
+          name: image-metadata-${{ github.run_id }}-${{ github.run_attempt }}
+          path: retail-store-sample-app/reports/images
+      - name: Reject unexpected skips, cancellations, failures or missing evidence
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: python3 scripts/ci/gate.py
+
+  publish:
+    needs: [plan, images, ci-required]
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      needs.ci-required.result == 'success' &&
+      needs.plan.outputs.any_source == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    concurrency:
+      group: dockerhub-retail-publish
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: ./retail-store-sample-app/.github/actions/setup-docker
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: image-archives-${{ github.run_id }}-${{ github.run_attempt }}
+          path: retail-store-sample-app/dist/ci/images
+      - name: Verify every downloaded archive before registry login
+        run: python3 scripts/ci/images.py verify --directory dist/ci/images
+      - name: Docker Hub login for trusted publication only
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3, verified
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Push the tested image set and verify registry digests
+        run: |
+          python3 scripts/ci/images.py publish --directory dist/ci/images
+          cp scripts/ci/images.schema.json dist/ci/images/images.schema.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: gitops-images-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            retail-store-sample-app/dist/ci/images/images.json
+            retail-store-sample-app/dist/ci/images/images.schema.json
+          if-no-files-found: error
+          retention-days: 90

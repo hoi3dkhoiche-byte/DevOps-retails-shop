@@ -6,7 +6,7 @@
       "plugin": "@nx-tools/nx-container",
       "options": {
         "defaultEngine": "docker",
-        "registry": "public.ecr.aws"
+        "defaultRegistry": "public.ecr.aws"
       }
     },
     "@nx-go/nx-go"
@@ -22,19 +22,22 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{projectRoot}"
-      }
+      },
+      "cache": false
     },
     "test:integration": {
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{projectRoot}"
-      }
+      },
+      "cache": false
     },
     "lint": {
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{projectRoot}"
-      }
+      },
+      "cache": false
     },
     "serve": {
       "executor": "nx:run-commands",
@@ -44,7 +47,7 @@
     },
     "container": {
       "executor": "@nx-tools/nx-container:build",
-      "cache": true,
+      "cache": false,
       "dependsOn": [],
       "options": {
         "context": "{projectRoot}",
@@ -79,8 +82,28 @@
     }
   },
   "namedInputs": {
-    "sharedGlobals": ["{workspaceRoot}/go.work"],
-    "default": ["{projectRoot}/**/*"],
-    "production": ["default", "!{projectRoot}/src/test/**/*"]
+    "sharedGlobals": [
+      "{workspaceRoot}/.mise.toml",
+      "{workspaceRoot}/package.json",
+      "{workspaceRoot}/yarn.lock",
+      "{workspaceRoot}/.yarnrc.yml",
+      "{workspaceRoot}/.github/actions/setup-env/**/*",
+      "{workspaceRoot}/scripts/ci/**/*",
+      "{workspaceRoot}/src/misc/**/*",
+      "{workspaceRoot}/samples/**/*"
+    ],
+    "default": [
+      "{projectRoot}/**/*",
+      "!{projectRoot}/target/**/*",
+      "!{projectRoot}/dist/**/*",
+      "!{projectRoot}/node_modules/**/*",
+      "!{projectRoot}/coverage/**/*",
+      "sharedGlobals"
+    ],
+    "production": [
+      "default",
+      "!{projectRoot}/src/test/**/*",
+      "!{projectRoot}/test/**/*"
+    ]
   }
 }

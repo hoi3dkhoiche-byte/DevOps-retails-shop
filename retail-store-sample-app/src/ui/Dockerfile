@@ -16,7 +16,7 @@ VOLUME /tmp
 WORKDIR /
 
 COPY .mvn .mvn
-COPY mvnw .
+COPY --chmod=0755 mvnw .
 COPY pom.xml .
 
 RUN ./mvnw dependency:go-offline -B -q

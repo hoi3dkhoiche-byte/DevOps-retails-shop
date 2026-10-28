@@ -7,7 +7,12 @@
     "build": {
       "executor": "nx:run-commands",
       "cache": true,
-      "inputs": ["{projectRoot}/**/*", "!{projectRoot}/dist/*"],
+      "inputs": [
+        "default",
+        {
+          "runtime": "go version"
+        }
+      ],
       "outputs": ["{projectRoot}/dist/*"],
       "options": {
         "command": "go build -o dist/main main.go"
@@ -15,25 +20,27 @@
     },
     "test": {
       "executor": "nx:run-commands",
-      "dependsOn": ["build"],
+      "dependsOn": [],
       "options": {
-        "command": "exit 0"
-      }
+        "command": "python3 ../../scripts/ci/checks.py unavailable --service catalog --suite unit"
+      },
+      "cache": false
     },
     "test:integration": {
       "executor": "nx:run-commands",
-      "dependsOn": ["test"],
-      "cache": true,
-      "inputs": ["{projectRoot}/**/*"],
+      "dependsOn": ["build"],
+      "cache": false,
+      "inputs": ["default"],
       "options": {
-        "command": "go test -v ./test/..."
+        "command": "go test -json -count=1 ./test/..."
       }
     },
     "lint": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "exit 0"
-      }
+        "command": "go vet ./..."
+      },
+      "cache": false
     },
     "serve": {
       "executor": "nx:run-commands",

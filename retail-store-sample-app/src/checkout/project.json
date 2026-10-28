@@ -7,25 +7,41 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": "src/checkout",
-        "command": "yarn install"
-      }
+        "command": "yarn install --immutable"
+      },
+      "cache": false
     },
     "build": {
-      "dependsOn": ["install"]
+      "dependsOn": ["install"],
+      "cache": true,
+      "inputs": [
+        "default",
+        {
+          "runtime": "node --version"
+        }
+      ],
+      "outputs": ["{projectRoot}/dist"]
     },
     "test": {
-      "dependsOn": ["build"]
+      "dependsOn": [],
+      "cache": false
     },
     "test:integration": {
-      "dependsOn": ["test"]
+      "executor": "nx:run-commands",
+      "cache": false,
+      "dependsOn": ["build"],
+      "inputs": ["default"],
+      "options": {
+        "command": "yarn test:integration --runInBand --json --outputFile=../../reports/ci-native/checkout-integration.json"
+      }
     },
     "lint": {
       "executor": "nx:run-commands",
       "dependsOn": ["install"],
-
       "options": {
         "command": "yarn lint"
-      }
+      },
+      "cache": false
     },
     "manifest": {},
     "helm": {}

@@ -1,0 +1,109 @@
+{
+  "schema": 1,
+  "services": {
+    "ui": {
+      "build": {
+        "required": true,
+        "target": "build"
+      },
+      "lint": {
+        "required": true,
+        "target": "lint"
+      },
+      "unit": {
+        "required": true,
+        "target": "test",
+        "format": "junit",
+        "minimum_executed": 1
+      },
+      "integration": {
+        "required": false,
+        "reason": "No UI tests carry the integration tag; unit tests and full-stack E2E are required"
+      }
+    },
+    "catalog": {
+      "build": {
+        "required": true,
+        "target": "build"
+      },
+      "lint": {
+        "required": true,
+        "target": "lint"
+      },
+      "unit": {
+        "required": false,
+        "reason": "No standalone unit suite; existing integration tests are required and counted"
+      },
+      "integration": {
+        "required": true,
+        "target": "test:integration",
+        "format": "go",
+        "minimum_executed": 1
+      }
+    },
+    "cart": {
+      "build": {
+        "required": true,
+        "target": "build"
+      },
+      "lint": {
+        "required": true,
+        "target": "lint"
+      },
+      "unit": {
+        "required": true,
+        "target": "test",
+        "format": "junit",
+        "minimum_executed": 1
+      },
+      "integration": {
+        "required": true,
+        "target": "test:integration",
+        "format": "junit",
+        "minimum_executed": 1
+      }
+    },
+    "checkout": {
+      "build": {
+        "required": true,
+        "target": "build"
+      },
+      "lint": {
+        "required": true,
+        "target": "lint"
+      },
+      "unit": {
+        "required": false,
+        "reason": "No standalone unit suite; existing integration tests are required and counted"
+      },
+      "integration": {
+        "required": true,
+        "target": "test:integration",
+        "format": "jest",
+        "minimum_executed": 1
+      }
+    },
+    "orders": {
+      "build": {
+        "required": true,
+        "target": "build"
+      },
+      "lint": {
+        "required": true,
+        "target": "lint"
+      },
+      "unit": {
+        "required": true,
+        "target": "test",
+        "format": "junit",
+        "minimum_executed": 1
+      },
+      "integration": {
+        "required": true,
+        "target": "test:integration",
+        "format": "junit",
+        "minimum_executed": 1
+      }
+    }
+  }
+}

@@ -5,6 +5,8 @@
 replicaCount: 1
 
 image:
+  # Set digest for GitOps; it takes precedence over tag.
+  digest: ""
   repository: public.ecr.aws/aws-containers/retail-store-sample-catalog
   pullPolicy: IfNotPresent
   tag: 

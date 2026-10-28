@@ -1,18 +1,19 @@
 [tools]
 java = "21"
 node = "22"
+go = "1.25"
 terraform = "1.14"
-kubectl = "1.34"
+kubectl = "1.35.0"
 helm = "3.19"
 helmfile = "1.2"
+jq = "1.8.1"
+kind = "0.31.0"
+actionlint = "1.7.7"
+trivy = "0.67.2"
+# Developer tools are retained; CI installs only its explicit tools input.
 awscli = "latest"
-jq = "latest"
 maven = "3.9"
-go = "1.25"
 tflint = "latest"
-
-[tools."ubi:kubernetes-sigs/kind"]
-version = "0.31"
 
 [tools."ubi:tilt-dev/tilt"]
 version = "0.36"
