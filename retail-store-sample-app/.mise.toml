@@ -9,7 +9,7 @@ helmfile = "1.2"
 jq = "1.8.1"
 kind = "0.31.0"
 actionlint = "1.7.7"
-trivy = "0.67.2"
+trivy = "0.76.1"
 # Developer tools are retained; CI installs only its explicit tools input.
 awscli = "latest"
 maven = "3.9"

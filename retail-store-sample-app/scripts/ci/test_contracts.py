@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 import tarfile
 import tempfile
+import tomllib
 import unittest
 from unittest import mock
 import xml.etree.ElementTree as ET
@@ -17,6 +18,14 @@ import e2e
 import gate
 import images
 import plan
+
+
+class ToolchainConfigTests(unittest.TestCase):
+    def test_scanner_install_and_runtime_version_are_the_same(self):
+        tools = tomllib.loads((images.APP_ROOT / ".mise.toml").read_text(encoding="utf-8"))["tools"]
+        workflow = (images.APP_ROOT.parent / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        expected = '  TRIVY_VERSION: "' + tools["trivy"] + '"'
+        self.assertEqual(workflow.count(expected), 1)
 
 
 class SelectionTests(unittest.TestCase):
@@ -204,7 +213,7 @@ class ImageContractTests(unittest.TestCase):
         env = dict(GITHUB_SHA="a" * 40, GITHUB_RUN_ID="123", GITHUB_RUN_ATTEMPT="2",
                    GITHUB_REPOSITORY="hoi3dkhoiche-byte/DevOps-retails-shop", GITHUB_SERVER_URL="https://github.com",
                    GITHUB_REF="refs/heads/main", GITHUB_EVENT_NAME="push",
-                   DOCKERHUB_NAMESPACE="hmannnguye", TRIVY_VERSION="0.67.2")
+                   DOCKERHUB_NAMESPACE="hmannnguye", TRIVY_VERSION="0.76.1")
         patch = mock.patch.dict(os.environ, env, clear=True)
         patch.start()
         self.addCleanup(patch.stop)
@@ -272,7 +281,7 @@ class ImageContractTests(unittest.TestCase):
 
         def fake_run(arguments, **kwargs):
             if arguments == ["trivy", "--version"]:
-                return "Version: 0.67.2\n"
+                return "Version: 0.76.1\n"
             scans.append(arguments)
             if len(scans) == 1:
                 raise subprocess.CalledProcessError(1, arguments)
