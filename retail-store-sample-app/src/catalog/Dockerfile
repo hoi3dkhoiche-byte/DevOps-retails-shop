@@ -1,6 +1,6 @@
 # Pin the same Go toolchain used by CI. Keep compilation on Amazon Linux so
 # CGO-backed SQLite uses a libc compatible with the final runtime image.
-FROM golang:1.26.9-bookworm@sha256:d9c68c2c51161e12fd77e4c6320687c9cd86e1af1e3ad6e6cd63ff970641453c AS go-toolchain
+FROM golang:1.26.10-bookworm@sha256:386f0cbb8fb3402ff5a15048c96731e6ff37142d31182f3b72306359a1f5e9b7 AS go-toolchain
 
 # Build Stage
 FROM public.ecr.aws/amazonlinux/amazonlinux:2023 AS build-env
