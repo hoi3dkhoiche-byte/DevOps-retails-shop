@@ -19,8 +19,8 @@
 package com.amazon.sample.ui.web;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -89,7 +89,7 @@ public class ChatController {
           return ServerSentEvent.<String>builder()
             .data(objectMapper.writeValueAsString(response))
             .build();
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
           throw new RuntimeException("Failed to serialize chat response", e);
         }
       });

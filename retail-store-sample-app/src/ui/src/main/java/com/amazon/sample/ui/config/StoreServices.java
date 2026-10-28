@@ -74,7 +74,7 @@ public class StoreServices {
   public Call.Factory tracedClientFactory(OpenTelemetry openTelemetry) {
     return OkHttpTelemetry.builder(openTelemetry)
       .build()
-      .newCallFactory(new OkHttpClient.Builder().build());
+      .createCallFactory(new OkHttpClient.Builder().build());
   }
 
   @Bean

@@ -239,6 +239,11 @@ class E2E:
                 self.run(self.kubectl("patch", "statefulset/orders-rabbitmq", "--type=strategic", "--patch", json.dumps(patch)))
                 self.run(self.kubectl("rollout", "status", "statefulset/orders-rabbitmq", "--timeout=600s"), timeout=630)
                 self.run(self.kubectl("rollout", "status", "deployment/orders", "--timeout=600s"), timeout=630)
+            else:
+                # Check the Deployment directly before reading runtime image IDs.
+                # Helm can return while a newly started UI container is not ready.
+                self.run(self.kubectl("rollout", "status", "deployment/" + RELEASE[service],
+                                      "--timeout=600s"), timeout=630)
         self.verify_kind()
         for service in SERVICES:
             self.start_forward(service)

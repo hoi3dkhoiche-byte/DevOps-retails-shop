@@ -5,7 +5,7 @@ management:
         include: info,health,metrics,prometheus
 
 spring.autoconfigure.exclude:
-  - org.springframework.boot.autoconfigure.amqp.RabbitAutoConfiguration
+  - org.springframework.boot.amqp.autoconfigure.RabbitAutoConfiguration
   - io.awspring.cloud.autoconfigure.sqs.SqsAutoConfiguration
 
 server:

@@ -19,8 +19,8 @@
 package com.amazon.sample.orders.messaging.sqs;
 
 import com.amazon.sample.orders.messaging.MessagingProvider;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 import io.awspring.cloud.sqs.operations.SqsOperations;
 
 public class SqsMessagingProvider implements MessagingProvider {
@@ -49,7 +49,7 @@ public class SqsMessagingProvider implements MessagingProvider {
           .queue(messageQueueTopic)
           .payload(mapper.writeValueAsString(event))
           .delaySeconds(DELAY);
-      } catch (JsonProcessingException e) {
+      } catch (JacksonException e) {
         e.printStackTrace();
       }
     });

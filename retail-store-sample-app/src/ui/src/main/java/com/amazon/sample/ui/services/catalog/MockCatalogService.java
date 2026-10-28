@@ -21,8 +21,8 @@ package com.amazon.sample.ui.services.catalog;
 import com.amazon.sample.ui.services.catalog.model.Product;
 import com.amazon.sample.ui.services.catalog.model.ProductPage;
 import com.amazon.sample.ui.services.catalog.model.ProductTag;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import java.io.IOException;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
 import java.io.InputStream;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -72,7 +72,7 @@ public class MockCatalogService implements CatalogService {
           new ProductTag(tag.getName(), tag.getDisplayName())
         );
       }
-    } catch (IOException e) {
+    } catch (JacksonException e) {
       throw new RuntimeException("Failed to load tags from JSON file", e);
     }
 
@@ -120,7 +120,7 @@ public class MockCatalogService implements CatalogService {
 
         productMap.put(product.getId(), product);
       }
-    } catch (IOException e) {
+    } catch (JacksonException e) {
       throw new RuntimeException("Failed to load products from JSON file", e);
     }
 

@@ -29,19 +29,20 @@ import org.springframework.amqp.rabbit.annotation.RabbitListenerConfigurer;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.amqp.rabbit.listener.RabbitListenerEndpointRegistrar;
-import org.springframework.amqp.support.converter.Jackson2JsonMessageConverter;
+import org.springframework.amqp.support.converter.JacksonJsonMessageConverter;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.autoconfigure.amqp.RabbitAutoConfiguration;
+import org.springframework.boot.amqp.autoconfigure.RabbitAutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
-import org.springframework.messaging.converter.MappingJackson2MessageConverter;
 import org.springframework.messaging.handler.annotation.support.DefaultMessageHandlerMethodFactory;
 import org.springframework.messaging.handler.annotation.support.MessageHandlerMethodFactory;
 
 @Configuration
+@Import(RabbitAutoConfiguration.class)
 @Slf4j
 @EnableConfigurationProperties(RabbitMQProperties.class)
 @ConditionalOnProperty(
@@ -49,9 +50,7 @@ import org.springframework.messaging.handler.annotation.support.MessageHandlerMe
   name = "provider",
   havingValue = "rabbitmq"
 )
-public class RabbitMQMessagingConfig
-  extends RabbitAutoConfiguration
-  implements RabbitListenerConfigurer {
+public class RabbitMQMessagingConfig implements RabbitListenerConfigurer {
 
   @Autowired
   private RabbitMQProperties properties;
@@ -92,13 +91,13 @@ public class RabbitMQMessagingConfig
     final ConnectionFactory connectionFactory
   ) {
     final RabbitTemplate rabbitTemplate = new RabbitTemplate(connectionFactory);
-    rabbitTemplate.setMessageConverter(producerJackson2MessageConverter());
+    rabbitTemplate.setMessageConverter(producerJacksonMessageConverter());
     return rabbitTemplate;
   }
 
   @Bean
-  public Jackson2JsonMessageConverter producerJackson2MessageConverter() {
-    return new Jackson2JsonMessageConverter();
+  public JacksonJsonMessageConverter producerJacksonMessageConverter() {
+    return new JacksonJsonMessageConverter();
   }
 
   // =======
@@ -115,13 +114,13 @@ public class RabbitMQMessagingConfig
     DefaultMessageHandlerMethodFactory messageHandlerMethodFactory =
       new DefaultMessageHandlerMethodFactory();
     messageHandlerMethodFactory.setMessageConverter(
-      consumerJackson2MessageConverter()
+      consumerJacksonMessageConverter()
     );
     return messageHandlerMethodFactory;
   }
 
   @Bean
-  public MappingJackson2MessageConverter consumerJackson2MessageConverter() {
-    return new MappingJackson2MessageConverter();
+  public org.springframework.messaging.converter.JacksonJsonMessageConverter consumerJacksonMessageConverter() {
+    return new org.springframework.messaging.converter.JacksonJsonMessageConverter();
   }
 }

@@ -19,7 +19,7 @@
 package com.amazon.sample.orders.config.messaging;
 
 import com.amazon.sample.orders.messaging.sqs.SqsMessagingProvider;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import io.awspring.cloud.autoconfigure.sqs.SqsAutoConfiguration;
 import io.awspring.cloud.autoconfigure.sqs.SqsProperties;
 import io.awspring.cloud.sqs.operations.SqsTemplate;

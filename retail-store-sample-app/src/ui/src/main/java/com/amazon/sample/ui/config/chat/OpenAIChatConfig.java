@@ -22,7 +22,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
-import org.springframework.ai.openai.api.OpenAiApi;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
@@ -46,19 +45,15 @@ public class OpenAIChatConfig {
     log.warn("Creating OpenAI chat client");
 
     var modelOptions = OpenAiChatOptions.builder()
+      .baseUrl(openaiProperties.getBaseUrl().replaceAll("/+$", "") + "/v1")
+      .apiKey(openaiProperties.getApiKey())
       .model(properties.getModel())
       .temperature(properties.getTemperature())
       .maxTokens(properties.getMaxTokens())
       .build();
 
     var chatModel = OpenAiChatModel.builder()
-      .openAiApi(
-        OpenAiApi.builder()
-          .baseUrl(openaiProperties.getBaseUrl())
-          .apiKey(openaiProperties.getApiKey())
-          .build()
-      )
-      .defaultOptions(modelOptions)
+      .options(modelOptions)
       .build();
     return ChatClient.create(chatModel);
   }

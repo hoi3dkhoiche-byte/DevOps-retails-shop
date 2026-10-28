@@ -55,7 +55,7 @@ public class BedrockChatConfig {
     var chatModel = BedrockProxyChatModel.builder()
       .credentialsProvider(DefaultCredentialsProvider.create())
       .region(Region.of(bedrockProperties.getRegion()))
-      .defaultOptions(modelOptions)
+      .options(modelOptions)
       .build();
 
     return ChatClient.create(chatModel);

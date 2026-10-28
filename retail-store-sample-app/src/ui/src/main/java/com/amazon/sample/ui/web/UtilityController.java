@@ -102,7 +102,7 @@ public class UtilityController {
   public ResponseEntity<Map<String, List<String>>> statusHeaders(
     @RequestHeader HttpHeaders headers
   ) {
-    return ResponseEntity.ok().body(headers);
+    return ResponseEntity.ok().body(headers.asMultiValueMap());
   }
 
   @GetMapping("/panic")
