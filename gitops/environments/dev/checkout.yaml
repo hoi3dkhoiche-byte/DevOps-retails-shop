@@ -1,0 +1,29 @@
+fullnameOverride: checkout
+replicaCount: 1
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: workload
+          operator: In
+          values:
+          - dev
+tolerations:
+- key: workload
+  operator: Equal
+  value: dev
+  effect: NoSchedule
+envFromSecrets:
+- checkout-runtime
+secretRevision: initial
+service:
+  type: ClusterIP
+  port: 80

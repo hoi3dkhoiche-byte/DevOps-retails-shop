@@ -84,7 +84,7 @@ func main() {
 	var searchRepo repository.SearchRepository
 	if config.OpenSearch.Enabled {
 		fmt.Println("OpenSearch is enabled, initializing...")
-		osRepo, err := repository.NewOpenSearchRepository(config.OpenSearch)
+		osRepo, err := repository.NewOpenSearchRepository(config.OpenSearch, db)
 		if err != nil {
 			log.Printf("Warning: Failed to initialize OpenSearch: %v\n", err)
 		} else {

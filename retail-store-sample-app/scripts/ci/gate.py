@@ -41,7 +41,7 @@ def validate_e2e(evidence, metadata, mode, native):
     require(evidence.get("status") == "passed" and evidence.get("mode") == mode, "E2E did not pass: " + mode)
     require(evidence.get("source_commit") == metadata["source_commit"] and evidence.get("run") == metadata["run"],
             "Stale E2E evidence")
-    require(evidence.get("backend_profile") == "upstream", "Unaccepted backend profile")
+    require(evidence.get("backend_profile") == "mysql-redis-opensearch", "Unaccepted backend profile")
     counts = junit_results(native, mode == "search")
     recorded = evidence.get("cypress")
     require(isinstance(recorded, dict) and isinstance(recorded.get("passed_test_names"), list)
@@ -102,7 +102,7 @@ def main():
     print(message)
     if os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as output:
-            output.write("\n## ci-required\n\n" + message + "\n\nBackend profile: upstream (Catalog MySQL/MariaDB, Cart DynamoDB, Orders PostgreSQL).\n")
+            output.write("\n## ci-required\n\n" + message + "\n\nBackend profile: mysql-redis-opensearch (shared MySQL 8.4, isolated service databases; Redis; OpenSearch).\n")
 
 
 if __name__ == "__main__":

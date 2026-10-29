@@ -1,0 +1,10 @@
+controller:
+  type: daemonset
+  tolerations:
+  - operator: Exists
+alloy:
+  configMap:
+    content: "discovery.kubernetes \"pods\" {\n  role = \"pod\"\n}\nloki.source.kubernetes\
+      \ \"pods\" {\n  targets = discovery.kubernetes.pods.targets\n  forward_to =\
+      \ [loki.write.default.receiver]\n}\nloki.write \"default\" {\n  endpoint { url\
+      \ = \"http://loki.monitoring.svc:3100/loki/api/v1/push\" }\n}\n"

@@ -1,0 +1,17 @@
+controller:
+  nodeSelector:
+    workload: management
+  tolerations:
+  - key: workload
+    operator: Equal
+    value: management
+    effect: NoSchedule
+  replicas: 1
+  extraArgs:
+  - --aws-verify-target-group
+  serviceAccount:
+    create: true
+    name: argo-rollouts
+    annotations: {}
+dashboard:
+  enabled: false

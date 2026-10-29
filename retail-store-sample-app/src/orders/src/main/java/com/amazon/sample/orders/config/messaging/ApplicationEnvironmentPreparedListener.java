@@ -16,7 +16,7 @@ public class ApplicationEnvironmentPreparedListener
       "retail.orders.messaging.provider"
     );
 
-    if (messagingProvider.equals("rabbitmq")) {
+    if ("rabbitmq".equals(messagingProvider)) {
       Properties props = new Properties();
       props.put(
         "spring.rabbitmq.addresses",

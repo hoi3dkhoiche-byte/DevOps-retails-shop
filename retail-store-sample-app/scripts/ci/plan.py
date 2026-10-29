@@ -101,7 +101,7 @@ def main():
     plan.update(event=args.event, sha=sha, base=base, paths=paths,
                 services=[s for s in SERVICES if s in selected],
                 nx_projects=known, nx_affected=affected,
-                backend_profile="upstream", reason=fallback or plan["reason"])
+                backend_profile="mysql-redis-opensearch", reason=fallback or plan["reason"])
     plan["any_source"] = bool(selected)
     plan["run_e2e"] = bool(selected)
     plan["source_matrix"] = {"include": [{"service": s} for s in plan["services"]]}

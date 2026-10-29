@@ -1,0 +1,52 @@
+{{- if .Values.release.enabled }}
+{{- $sha := required "CI release source_commit is required" .Values.release.source_commit }}
+{{- if not (regexMatch "^[0-9a-f]{40}$" $sha) }}{{ fail "source_commit must be an immutable commit SHA" }}{{ end }}
+{{- if ne .Values.release.backend_profile "mysql-redis-opensearch" }}{{ fail "Backend profile has not been accepted" }}{{ end }}
+{{- range $service := list "ui" "catalog" "cart" "checkout" "orders" }}
+{{- $image := required (printf "Missing verified image %s" $service) (index $.Values.images $service) }}
+{{- if not (regexMatch "^sha256:[0-9a-f]{64}$" $image.digest) }}{{ fail "A registry digest is required" }}{{ end }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: retail-{{ $.Values.environment }}-{{ $service }}
+  namespace: argocd
+  labels:
+    retail/environment: {{ $.Values.environment }}
+spec:
+  project: retail-{{ $.Values.environment }}
+  sources:
+    - repoURL: {{ $.Values.sourceRepo | quote }}
+      targetRevision: {{ $sha | quote }}
+      path: retail-store-sample-app/src/{{ $service }}/chart
+      helm:
+        releaseName: {{ $service }}
+        valueFiles:
+          - $values/environments/{{ $.Values.environment }}/{{ $service }}.yaml
+        parameters:
+          - name: image.repository
+            value: {{ $image.repository | quote }}
+          - name: image.digest
+            value: {{ $image.digest | quote }}
+    - repoURL: {{ $.Values.gitopsRepo | quote }}
+      targetRevision: {{ $.Values.gitopsRevision | quote }}
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: retail-{{ $.Values.environment }}
+  {{- if eq $service "ui" }}
+  ignoreDifferences:
+    - group: argoproj.io
+      kind: Rollout
+      jsonPointers: [/spec/replicas]
+    - group: ""
+      kind: Service
+      jqPathExpressions: ['.spec.selector."rollouts-pod-template-hash"']
+  {{- end }}
+  syncPolicy:
+    {{- if eq $.Values.environment "dev" }}
+    automated: {selfHeal: true, prune: true}
+    {{- end }}
+    syncOptions: [RespectIgnoreDifferences=true]
+{{- end }}
+{{- end }}

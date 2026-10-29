@@ -99,7 +99,7 @@ def context():
     return {"schema_version": 1, "source_commit": source,
             "run": {"id": run_id, "attempt": attempt,
                     "url": f"{server}/{repository}/actions/runs/{run_id}/attempts/{attempt}"},
-            "platform": PLATFORM, "backend_profile": "upstream"}
+            "platform": PLATFORM, "backend_profile": "mysql-redis-opensearch"}
 
 
 def tag_for(expected):

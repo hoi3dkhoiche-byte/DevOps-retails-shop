@@ -1,0 +1,21 @@
+nodeSelector:
+  workload: management
+tolerations:
+- key: workload
+  operator: Equal
+  value: management
+  effect: NoSchedule
+cloudProvider: aws
+awsRegion: ap-southeast-1
+autoDiscovery:
+  clusterName: retail-lab-eks
+image:
+  tag: v1.36.1
+rbac:
+  serviceAccount:
+    create: true
+    name: cluster-autoscaler
+    annotations: {}
+extraArgs:
+  balance-similar-node-groups: false
+  skip-nodes-with-system-pods: false

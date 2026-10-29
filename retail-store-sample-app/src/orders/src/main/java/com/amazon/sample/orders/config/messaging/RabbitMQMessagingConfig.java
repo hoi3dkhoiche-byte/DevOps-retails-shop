@@ -1,126 +1,56 @@
-/*
- * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
- * SPDX-License-Identifier: MIT-0
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy of this
- * software and associated documentation files (the "Software"), to deal in the Software
- * without restriction, including without limitation the rights to use, copy, modify,
- * merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
- * permit persons to whom the Software is furnished to do so.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
- * INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
- * PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
- * HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
- * OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
- * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
- */
-
 package com.amazon.sample.orders.config.messaging;
 
 import com.amazon.sample.orders.messaging.MessagingProvider;
+import com.amazon.sample.orders.messaging.rabbitmq.MySQLOrderEvents;
 import com.amazon.sample.orders.messaging.rabbitmq.RabbitMQMessagingProvider;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.amqp.core.Binding;
-import org.springframework.amqp.core.BindingBuilder;
-import org.springframework.amqp.core.FanoutExchange;
-import org.springframework.amqp.core.Queue;
-import org.springframework.amqp.rabbit.annotation.RabbitListenerConfigurer;
+import org.springframework.amqp.core.*;
+import org.springframework.amqp.rabbit.annotation.EnableRabbit;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
-import org.springframework.amqp.rabbit.listener.RabbitListenerEndpointRegistrar;
 import org.springframework.amqp.support.converter.JacksonJsonMessageConverter;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.amqp.autoconfigure.RabbitAutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Import;
-import org.springframework.context.annotation.Primary;
-import org.springframework.messaging.handler.annotation.support.DefaultMessageHandlerMethodFactory;
-import org.springframework.messaging.handler.annotation.support.MessageHandlerMethodFactory;
+import org.springframework.context.annotation.*;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 @Configuration
+@EnableRabbit
+@EnableScheduling
 @Import(RabbitAutoConfiguration.class)
-@Slf4j
 @EnableConfigurationProperties(RabbitMQProperties.class)
-@ConditionalOnProperty(
-  prefix = MessagingProperties.PREFIX,
-  name = "provider",
-  havingValue = "rabbitmq"
-)
-public class RabbitMQMessagingConfig implements RabbitListenerConfigurer {
-
-  @Autowired
-  private RabbitMQProperties properties;
-
-  public static final String EXCHANGE_NAME = "orders-exchange";
-
-  public static final String ORDERS_ORDERS_QUEUE = "orders-orders-queue";
+@ConditionalOnProperty(prefix = MessagingProperties.PREFIX, name = "provider", havingValue = "rabbitmq")
+public class RabbitMQMessagingConfig {
+  public static final String EXCHANGE_NAME = "orders.events";
+  public static final String ORDERS_ORDERS_QUEUE = "orders.events.v2";
 
   @Bean
-  public MessagingProvider messagingProvider(RabbitTemplate template) {
-    log.info("Using RabbitMQ messaging");
-    log.info(
-      "RabbitMQ addresses: {}",
-      String.join(",", this.properties.getAddresses())
-    );
-
-    return new RabbitMQMessagingProvider(template);
-  }
-
-  @Bean
-  Queue queue() {
-    return new Queue(ORDERS_ORDERS_QUEUE, false);
-  }
-
-  @Bean
-  FanoutExchange exchange() {
-    return new FanoutExchange(EXCHANGE_NAME);
-  }
-
-  @Bean
-  Binding binding(Queue queue, FanoutExchange exchange) {
-    return BindingBuilder.bind(queue).to(exchange);
+  Declarables orderTopology() {
+    TopicExchange exchange = new TopicExchange(EXCHANGE_NAME, true, false);
+    TopicExchange deadExchange = new TopicExchange("orders.dlx", true, false);
+    Queue queue = QueueBuilder.durable(ORDERS_ORDERS_QUEUE).quorum()
+      .deadLetterExchange("orders.dlx").deadLetterRoutingKey("orders.failed").build();
+    Queue deadQueue = QueueBuilder.durable("orders.events.dlq").quorum().build();
+    return new Declarables(exchange, deadExchange, queue, deadQueue,
+      BindingBuilder.bind(queue).to(exchange).with("orders.created"),
+      BindingBuilder.bind(deadQueue).to(deadExchange).with("orders.failed"));
   }
 
   @Bean
   @Primary
-  public RabbitTemplate customRabbitTemplate(
-    final ConnectionFactory connectionFactory
-  ) {
-    final RabbitTemplate rabbitTemplate = new RabbitTemplate(connectionFactory);
-    rabbitTemplate.setMessageConverter(producerJacksonMessageConverter());
-    return rabbitTemplate;
+  RabbitTemplate customRabbitTemplate(ConnectionFactory factory) {
+    RabbitTemplate template = new RabbitTemplate(factory);
+    template.setMessageConverter(new JacksonJsonMessageConverter());
+    template.setMandatory(true);
+    return template;
   }
 
   @Bean
-  public JacksonJsonMessageConverter producerJacksonMessageConverter() {
-    return new JacksonJsonMessageConverter();
-  }
-
-  // =======
-
-  @Override
-  public void configureRabbitListeners(
-    RabbitListenerEndpointRegistrar registrar
-  ) {
-    registrar.setMessageHandlerMethodFactory(messageHandlerMethodFactory());
-  }
-
-  @Bean
-  MessageHandlerMethodFactory messageHandlerMethodFactory() {
-    DefaultMessageHandlerMethodFactory messageHandlerMethodFactory =
-      new DefaultMessageHandlerMethodFactory();
-    messageHandlerMethodFactory.setMessageConverter(
-      consumerJacksonMessageConverter()
-    );
-    return messageHandlerMethodFactory;
-  }
-
-  @Bean
-  public org.springframework.messaging.converter.JacksonJsonMessageConverter consumerJacksonMessageConverter() {
-    return new org.springframework.messaging.converter.JacksonJsonMessageConverter();
+  MessagingProvider messagingProvider(RabbitTemplate template, JdbcTemplate jdbc,
+    @Value("${retail.orders.persistence.provider}") String provider) {
+    if ("mysql".equals(provider)) return new MySQLOrderEvents(template, jdbc);
+    return new RabbitMQMessagingProvider(template);
   }
 }

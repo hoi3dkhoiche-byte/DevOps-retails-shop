@@ -1,0 +1,4 @@
+apiVersion: v2
+name: retail-platform-resources
+version: 1.0.0
+type: application

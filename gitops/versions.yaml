@@ -1,0 +1,40 @@
+argo-cd:
+  repository: https://argoproj.github.io/argo-helm
+  version: 10.11.6
+  appVersion: v3.5.6
+argo-rollouts:
+  repository: https://argoproj.github.io/argo-helm
+  version: 2.43.8
+  appVersion: v1.10.1
+aws-load-balancer-controller:
+  repository: https://aws.github.io/eks-charts
+  version: 3.6.2
+  appVersion: v3.6.2
+external-secrets:
+  repository: https://charts.external-secrets.io
+  version: 2.14.0
+  appVersion: v2.14.0
+metrics-server:
+  repository: https://kubernetes-sigs.github.io/metrics-server
+  version: 3.14.0
+  appVersion: 0.9.0
+cluster-autoscaler:
+  repository: https://kubernetes.github.io/autoscaler
+  version: 9.59.0
+  appVersion: 1.35.0
+kube-prometheus-stack:
+  repository: https://prometheus-community.github.io/helm-charts
+  version: 92.14.1
+  appVersion: v0.94.2
+loki:
+  repository: https://grafana.github.io/helm-charts
+  version: 7.5.0
+  appVersion: 3.6.16
+alloy:
+  repository: https://grafana.github.io/helm-charts
+  version: 1.14.4
+  appVersion: v1.21.3
+velero:
+  repository: https://vmware-tanzu.github.io/helm-charts
+  version: 12.2.1
+  appVersion: 1.18.2

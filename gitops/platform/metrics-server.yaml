@@ -1,0 +1,8 @@
+nodeSelector:
+  workload: management
+tolerations:
+- key: workload
+  operator: Equal
+  value: management
+  effect: NoSchedule
+replicas: 1

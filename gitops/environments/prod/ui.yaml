@@ -1,0 +1,49 @@
+fullnameOverride: ui
+replicaCount: 1
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: workload
+          operator: In
+          values:
+          - prod
+tolerations:
+- key: workload
+  operator: Equal
+  value: prod
+  effect: NoSchedule
+envFromSecrets: []
+secretRevision: initial
+service:
+  type: ClusterIP
+  port: 80
+rollout:
+  enabled: true
+  autoPromotionEnabled: false
+  previewReplicaCount: 1
+  scaleDownDelaySeconds: 120
+  revisionHistoryLimit: 3
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 7
+  targetCPUUtilizationPercentage: 70
+app:
+  endpoints:
+    catalog: http://catalog
+    carts: http://carts
+    checkout: http://checkout
+    orders: http://orders
+  search:
+    enabled: true
+  chat:
+    enabled: false

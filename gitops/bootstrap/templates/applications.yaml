@@ -1,0 +1,83 @@
+{{- range $env := list "dev" "prod" }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: retail-{{ $env }}-configuration
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+spec:
+  project: retail-platform
+  source:
+    repoURL: {{ $.Values.gitopsRepo | quote }}
+    targetRevision: {{ $.Values.gitopsRevision | quote }}
+    path: applications
+    helm:
+      valueFiles:
+        - ../config.yaml
+        - ../environments/{{ $env }}/images.yaml
+      parameters:
+        - name: environment
+          value: {{ $env }}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: retail-{{ $env }}
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: false
+{{- end }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: retail-platform-resources
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+spec:
+  project: retail-platform
+  source:
+    repoURL: {{ .Values.gitopsRepo | quote }}
+    targetRevision: {{ .Values.gitopsRevision | quote }}
+    path: platform-resources
+    helm:
+      valueFiles: [../config.yaml]
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated: {selfHeal: true, prune: false}
+    syncOptions: [CreateNamespace=true, ServerSideApply=true]
+{{- $namespaces := dict "argo-rollouts" "argo-rollouts" "aws-load-balancer-controller" "kube-system" "external-secrets" "external-secrets" "metrics-server" "kube-system" "cluster-autoscaler" "kube-system" "kube-prometheus-stack" "monitoring" "loki" "monitoring" "alloy" "monitoring" "velero" "velero" }}
+{{- range $chart, $namespace := $namespaces }}
+{{- $version := index $.Values $chart }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: {{ $chart }}
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: {{ ternary "-5" "0" (or (eq $chart "external-secrets") (eq $chart "argo-rollouts")) | quote }}
+spec:
+  project: retail-platform
+  sources:
+    - repoURL: {{ $version.repository | quote }}
+      chart: {{ $chart }}
+      targetRevision: {{ $version.version | quote }}
+      helm:
+        releaseName: {{ $chart }}
+        valueFiles:
+          - $values/platform/{{ $chart }}.yaml
+    - repoURL: {{ $.Values.gitopsRepo | quote }}
+      targetRevision: {{ $.Values.gitopsRevision | quote }}
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: {{ $namespace }}
+  syncPolicy:
+    automated: {selfHeal: true, prune: false}
+    syncOptions: [CreateNamespace=true, ServerSideApply=true]
+{{- end }}

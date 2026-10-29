@@ -1,0 +1,35 @@
+{{- if or .Values.domain (eq .Values.environment "prod") }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: retail-ui
+  annotations:
+    alb.ingress.kubernetes.io/group.name: retail-public
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/healthcheck-path: /actuator/health/readiness
+    alb.ingress.kubernetes.io/success-codes: "200"
+    {{- if .Values.domain }}
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/certificate-arn: {{ required "Domain ingress requires a validated ACM certificate" .Values.certificateArn | quote }}
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    {{- if eq .Values.environment "dev" }}
+    alb.ingress.kubernetes.io/conditions.ui-active: {{ list (dict "field" "source-ip" "sourceIpConfig" (dict "values" .Values.adminCidrs)) | toJson | quote }}
+    {{- end }}
+    {{- else }}
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'
+    alb.ingress.kubernetes.io/inbound-cidrs: {{ join "," .Values.adminCidrs | quote }}
+    {{- end }}
+spec:
+  ingressClassName: alb
+  rules:
+    - {{ if .Values.domain }}host: {{ printf "%sretail.%s" (ternary "dev." "" (eq .Values.environment "dev")) .Values.domain | quote }}{{ end }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ui-active
+                port: {number: 80}
+{{- end }}

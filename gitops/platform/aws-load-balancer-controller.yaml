@@ -1,0 +1,14 @@
+nodeSelector:
+  workload: management
+tolerations:
+- key: workload
+  operator: Equal
+  value: management
+  effect: NoSchedule
+clusterName: retail-lab-eks
+region: ap-southeast-1
+replicaCount: 1
+serviceAccount:
+  create: true
+  name: aws-load-balancer-controller
+  annotations: {}

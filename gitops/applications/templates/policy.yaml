@@ -1,0 +1,136 @@
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: retail-quota
+spec:
+  hard:
+    requests.cpu: {{ ternary "3" "5" (eq .Values.environment "dev") | quote }}
+    requests.memory: {{ ternary "6Gi" "12Gi" (eq .Values.environment "dev") }}
+    limits.cpu: {{ ternary "10" "20" (eq .Values.environment "dev") | quote }}
+    limits.memory: {{ ternary "12Gi" "24Gi" (eq .Values.environment "dev") }}
+    pods: {{ ternary "20" "30" (eq .Values.environment "dev") | quote }}
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: retail-defaults
+spec:
+  limits:
+    - type: Container
+      defaultRequest: {cpu: 100m, memory: 128Mi}
+      default: {cpu: 500m, memory: 512Mi}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: dns-and-monitoring
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+          podSelector:
+            matchLabels: {k8s-app: kube-dns}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: monitoring}
+      ports: [{protocol: TCP, port: 8080}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ui-to-apis
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: ui}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        {{- range .Values.publicCidrs }}
+        - ipBlock: {cidr: {{ . }}}
+        {{- end }}
+      ports: [{protocol: TCP, port: 8080}]
+  egress:
+    - to:
+        - podSelector:
+            matchExpressions:
+              - {key: app.kubernetes.io/name, operator: In, values: [catalog, carts, checkout, orders]}
+      ports: [{protocol: TCP, port: 8080}]
+{{- range $service := list "catalog" "carts" "checkout" "orders" }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $service }}-api
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: {{ $service }}}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: ui}
+        {{- if eq $service "orders" }}
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: checkout}
+        {{- end }}
+      ports: [{protocol: TCP, port: 8080}]
+  egress:
+    {{- if eq $service "checkout" }}
+    - to:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: orders}
+      ports: [{protocol: TCP, port: 8080}]
+    {{- end }}
+    - to:
+        {{- range $.Values.dataCidrs }}
+        - ipBlock: {cidr: {{ . }}}
+        {{- end }}
+      ports:
+        {{- if eq $service "checkout" }}
+        - {protocol: TCP, port: 6379}
+        {{- else }}
+        - {protocol: TCP, port: 3306}
+        {{- end }}
+        {{- if eq $service "catalog" }}
+        - {protocol: TCP, port: 443}
+        {{- end }}
+        {{- if eq $service "orders" }}
+        - {protocol: TCP, port: 5671}
+        {{- end }}
+{{- end }}
+---
+apiVersion: vpcresources.k8s.aws/v1beta1
+kind: SecurityGroupPolicy
+metadata:
+  name: orders-backends
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: orders}
+  securityGroups:
+    groupIds:
+      - {{ .Values.nodeSecurityGroupId | quote }}
+      - {{ .Values.ordersSecurityGroupId | quote }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: retail-observer
+rules:
+  - apiGroups: ["", apps, argoproj.io, autoscaling]
+    resources: [pods, pods/log, services, events, deployments, replicasets, rollouts, horizontalpodautoscalers]
+    verbs: [get, list, watch]

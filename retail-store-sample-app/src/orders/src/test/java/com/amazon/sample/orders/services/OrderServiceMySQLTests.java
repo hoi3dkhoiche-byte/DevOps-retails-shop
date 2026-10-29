@@ -38,39 +38,40 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.postgresql.PostgreSQLContainer;
+import org.testcontainers.mysql.MySQLContainer;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Tag("integration")
-public class OrderServicePostgresTests {
+public class OrderServiceMySQLTests {
 
   @LocalServerPort
   private Integer port;
 
-  static PostgreSQLContainer postgres = new PostgreSQLContainer(
-    "postgres:17.2"
+  static MySQLContainer mysql = new MySQLContainer(
+    "mysql:8.4.11"
   );
 
   @BeforeAll
   static void beforeAll() {
-    postgres.start();
+    mysql.start();
   }
 
   @AfterAll
   static void afterAll() {
-    postgres.stop();
+    mysql.stop();
   }
 
   @DynamicPropertySource
   static void configureProperties(DynamicPropertyRegistry registry) {
-    registry.add("retail.orders.persistence.provider", () -> "postgres");
+    registry.add("retail.orders.persistence.provider", () -> "mysql");
+    registry.add("retail.orders.persistence.ssl-mode", () -> "DISABLED");
     registry.add(
       "retail.orders.persistence.endpoint",
-      () -> postgres.getHost() + ":" + postgres.getMappedPort(5432)
+      () -> mysql.getHost() + ":" + mysql.getMappedPort(3306)
     );
-    registry.add("retail.orders.persistence.username", postgres::getUsername);
-    registry.add("retail.orders.persistence.password", postgres::getPassword);
-    registry.add("retail.orders.persistence.name", postgres::getDatabaseName);
+    registry.add("retail.orders.persistence.username", mysql::getUsername);
+    registry.add("retail.orders.persistence.password", mysql::getPassword);
+    registry.add("retail.orders.persistence.name", mysql::getDatabaseName);
   }
 
   @Autowired

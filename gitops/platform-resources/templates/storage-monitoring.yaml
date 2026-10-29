@@ -1,0 +1,65 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: gp3-retain
+provisioner: ebs.csi.aws.com
+parameters:
+  type: gp3
+  encrypted: "true"
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+{{- range $environment := list "dev" "prod" }}
+{{- range $service := list "ui" "catalog" "carts" "checkout" "orders" }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: retail-{{ $environment }}-{{ $service }}
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames: [retail-{{ $environment }}]
+  selector:
+    matchLabels: {app.kubernetes.io/name: {{ $service }}}
+  podMetricsEndpoints:
+    - port: http
+      path: {{ ternary "/metrics" "/actuator/prometheus" (or (eq $service "catalog") (eq $service "checkout")) }}
+      interval: 30s
+{{- end }}
+{{- end }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: retail-alerts
+  namespace: monitoring
+  labels: {release: kube-prometheus-stack}
+spec:
+  groups:
+    - name: retail
+      rules:
+        - alert: RetailPodCrashLooping
+          expr: increase(kube_pod_container_status_restarts_total{namespace=~"retail-.*"}[10m]) > 3
+          for: 5m
+          labels: {severity: warning}
+          annotations: {summary: "Retail container is repeatedly restarting"}
+        - alert: RetailMissingReplica
+          expr: kube_deployment_spec_replicas{namespace=~"retail-.*"} > kube_deployment_status_replicas_available{namespace=~"retail-.*"}
+          for: 5m
+          labels: {severity: critical}
+          annotations: {summary: "Retail deployment has unavailable replicas"}
+        - alert: MonitoringVolumeAlmostFull
+          expr: kubelet_volume_stats_available_bytes{namespace="monitoring"} / kubelet_volume_stats_capacity_bytes{namespace="monitoring"} < 0.15
+          for: 10m
+          labels: {severity: warning}
+          annotations: {summary: "Monitoring volume has less than 15 percent free space"}
+        - alert: RetailHTTPServerErrors
+          expr: sum(rate(http_server_requests_seconds_count{namespace=~"retail-.*",status=~"5.."}[5m])) > 0.1
+          for: 5m
+          labels: {severity: critical}
+          annotations: {summary: "Retail HTTP 5xx responses are increasing"}
+        - alert: RetailBackupFailed
+          expr: increase(velero_backup_failure_total[24h]) > 0
+          labels: {severity: critical}
+          annotations: {summary: "Velero backup failed"}

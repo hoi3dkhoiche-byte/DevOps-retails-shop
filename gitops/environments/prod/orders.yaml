@@ -1,0 +1,46 @@
+fullnameOverride: orders
+replicaCount: 1
+resources:
+  requests:
+    cpu: 250m
+    memory: 768Mi
+  limits:
+    cpu: 1000m
+    memory: 1536Mi
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: workload
+          operator: In
+          values:
+          - prod
+tolerations:
+- key: workload
+  operator: Equal
+  value: prod
+  effect: NoSchedule
+envFromSecrets:
+- orders-runtime
+- orders-rabbitmq-runtime
+secretRevision: initial
+service:
+  type: ClusterIP
+  port: 80
+app:
+  persistence:
+    secret:
+      create: false
+  messaging:
+    rabbitmq:
+      secret:
+        create: false
+extraVolumes:
+- name: rds-ca
+  configMap:
+    name: rds-ca
+extraVolumeMounts:
+- name: rds-ca
+  mountPath: /etc/retail/tls
+  readOnly: true

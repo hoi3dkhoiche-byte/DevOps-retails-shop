@@ -1,0 +1,75 @@
+prometheus:
+  prometheusSpec:
+    nodeSelector: &id001
+      workload: management
+    tolerations: &id002
+    - key: workload
+      operator: Equal
+      value: management
+      effect: NoSchedule
+    replicas: 1
+    retention: 7d
+    retentionSize: 24GB
+    scrapeInterval: 30s
+    evaluationInterval: 30s
+    resources:
+      requests:
+        cpu: 500m
+        memory: 2Gi
+      limits:
+        cpu: 1000m
+        memory: 4Gi
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: gp3-retain
+          accessModes:
+          - ReadWriteOnce
+          resources:
+            requests:
+              storage: 30Gi
+    podMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorSelectorNilUsesHelmValues: false
+grafana:
+  nodeSelector: *id001
+  tolerations: *id002
+  service:
+    type: ClusterIP
+  persistence:
+    enabled: true
+    storageClassName: gp3-retain
+    size: 5Gi
+  admin:
+    existingSecret: grafana-admin
+    userKey: username
+    passwordKey: password
+  additionalDataSources:
+  - name: Loki
+    type: loki
+    url: http://loki:3100
+    access: proxy
+alertmanager:
+  alertmanagerSpec:
+    nodeSelector: *id001
+    tolerations: *id002
+    replicas: 1
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: gp3-retain
+          accessModes:
+          - ReadWriteOnce
+          resources:
+            requests:
+              storage: 2Gi
+prometheusOperator:
+  nodeSelector: *id001
+  tolerations: *id002
+  admissionWebhooks:
+    patch: &id003
+      nodeSelector: *id001
+      tolerations: *id002
+kube-state-metrics: *id003
+prometheus-node-exporter:
+  tolerations:
+  - operator: Exists

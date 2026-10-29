@@ -1,0 +1,21 @@
+# Replace the administration role/IP and secret ARNs with your actual values.
+admin_cidrs   = ["203.0.113.10/32"]
+admin_role_arn = "arn:aws:iam::123456789012:role/REPLACE_ADMIN_ROLE"
+github_oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+terraform_policy_arn     = "arn:aws:iam::123456789012:policy/REPLACE_REVIEWED_INFRA_POLICY"
+
+# Run scripts/infra/resolve-addons.py, review its output, then paste exact builds.
+addon_versions = {
+  vpc_cni    = "REPLACE_WITH_EKS_1_36_COMPATIBLE_BUILD"
+  coredns    = "REPLACE_WITH_EKS_1_36_COMPATIBLE_BUILD"
+  kube_proxy = "REPLACE_WITH_EKS_1_36_COMPATIBLE_BUILD"
+  ebs_csi    = "REPLACE_WITH_EKS_1_36_COMPATIBLE_BUILD"
+}
+platform_secret_arns = {
+  mq_admin    = "arn:aws:secretsmanager:ap-southeast-1:123456789012:secret:/retail/platform/mq/admin-REPLACE"
+  search_admin = "arn:aws:secretsmanager:ap-southeast-1:123456789012:secret:/retail/platform/search/admin-REPLACE"
+  redis_dev   = "arn:aws:secretsmanager:ap-southeast-1:123456789012:secret:/retail/platform/redis/dev-REPLACE"
+  redis_prod  = "arn:aws:secretsmanager:ap-southeast-1:123456789012:secret:/retail/platform/redis/prod-REPLACE"
+}
+domain         = ""
+hosted_zone_id = ""

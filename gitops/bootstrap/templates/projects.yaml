@@ -1,0 +1,46 @@
+{{- range $env := list "dev" "prod" }}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: retail-{{ $env }}
+  labels:
+    retail/environment: {{ $env }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: retail-{{ $env }}
+  namespace: argocd
+spec:
+  sourceRepos:
+    - {{ $.Values.sourceRepo | quote }}
+    - {{ $.Values.gitopsRepo | quote }}
+  destinations:
+    - namespace: retail-{{ $env }}
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist: []
+{{- end }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: retail-platform
+  namespace: argocd
+spec:
+  sourceRepos:
+    - {{ .Values.gitopsRepo | quote }}
+    - https://argoproj.github.io/argo-helm
+    - https://aws.github.io/eks-charts
+    - https://charts.external-secrets.io
+    - https://kubernetes-sigs.github.io/metrics-server
+    - https://kubernetes.github.io/autoscaler
+    - https://prometheus-community.github.io/helm-charts
+    - https://grafana.github.io/helm-charts
+    - https://vmware-tanzu.github.io/helm-charts
+  destinations:
+    - namespace: '*'
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - group: '*'
+      kind: '*'

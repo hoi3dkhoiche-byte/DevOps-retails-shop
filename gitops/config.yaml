@@ -1,0 +1,23 @@
+gitopsRepo: https://github.com/hoi3dkhoiche-byte/DevOps-retails-shop-gitops.git
+gitopsRevision: main
+sourceRepo: https://github.com/hoi3dkhoiche-byte/DevOps-retails-shop.git
+region: ap-southeast-1
+clusterName: retail-lab-eks
+vpcId: REPLACE_FROM_TERRAFORM
+accountId: REPLACE_FROM_TERRAFORM
+nodeSecurityGroupId: REPLACE_FROM_TERRAFORM
+ordersSecurityGroupId: REPLACE_FROM_TERRAFORM
+domain: ''
+certificateArn: ''
+adminCidrs:
+- 203.0.113.10/32
+roles: {}
+buckets: {}
+publicCidrs:
+- 10.0.10.0/24
+- 10.0.20.0/24
+- 10.0.30.0/24
+dataCidrs:
+- 10.0.100.0/24
+- 10.0.110.0/24
+- 10.0.120.0/24

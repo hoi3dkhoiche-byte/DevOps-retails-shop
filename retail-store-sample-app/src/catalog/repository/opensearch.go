@@ -41,6 +41,7 @@ type SearchRepository interface {
 type OpenSearchRepository struct {
 	client    *opensearch.Client
 	indexName string
+	source    CatalogRepository
 }
 
 // ProductDocument represents the product structure stored in OpenSearch
@@ -65,7 +66,7 @@ type SearchResponse struct {
 }
 
 // NewOpenSearchRepository creates a new OpenSearch repository
-func NewOpenSearchRepository(config config.OpenSearchConfiguration) (*OpenSearchRepository, error) {
+func NewOpenSearchRepository(config config.OpenSearchConfiguration, source CatalogRepository) (*OpenSearchRepository, error) {
 	cfg := opensearch.Config{
 		Addresses: []string{config.Endpoint},
 		Transport: &http.Transport{
@@ -102,6 +103,7 @@ func NewOpenSearchRepository(config config.OpenSearchConfiguration) (*OpenSearch
 	return &OpenSearchRepository{
 		client:    client,
 		indexName: config.IndexName,
+		source:    source,
 	}, nil
 }
 
@@ -206,8 +208,12 @@ func (r *OpenSearchRepository) createAndPopulateIndex(ctx context.Context) error
 
 	fmt.Println("Created OpenSearch index with mappings")
 
-	// Load products from JSON file
-	products, err := LoadProductData()
+	// Rebuild from the same SQL rows served by the Catalog API.
+	count, err := r.source.CountProducts(nil, ctx)
+	if err != nil {
+		return fmt.Errorf("count catalog products: %w", err)
+	}
+	products, err := r.source.GetProducts(nil, "", 1, count+1, ctx)
 	if err != nil {
 		return fmt.Errorf("failed to load product data: %w", err)
 	}
@@ -221,12 +227,16 @@ func (r *OpenSearchRepository) createAndPopulateIndex(ctx context.Context) error
 		bulkBody.WriteString("\n")
 
 		// Document line
+		tags := make([]string, len(product.Tags))
+		for i, tag := range product.Tags {
+			tags[i] = tag.Name
+		}
 		doc := ProductDocument{
 			ID:          product.ID,
 			Name:        product.Name,
 			Description: product.Description,
 			Price:       product.Price,
-			Tags:        product.Tags,
+			Tags:        tags,
 		}
 		docJSON, err := json.Marshal(doc)
 		if err != nil {
@@ -251,6 +261,15 @@ func (r *OpenSearchRepository) createAndPopulateIndex(ctx context.Context) error
 		return fmt.Errorf("bulk indexing error: %s", bulkRes.String())
 	}
 
+	var result struct {
+		Errors bool `json:"errors"`
+	}
+	if err := json.NewDecoder(bulkRes.Body).Decode(&result); err != nil {
+		return fmt.Errorf("decode bulk response: %w", err)
+	}
+	if result.Errors {
+		return fmt.Errorf("OpenSearch rejected one or more catalog documents")
+	}
 	fmt.Printf("Successfully indexed %d products into OpenSearch\n", len(products))
 	return nil
 }

@@ -1,5 +1,10 @@
+{{- if .Values.rollout.enabled }}
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+{{- else }}
 apiVersion: apps/v1
 kind: Deployment
+{{- end }}
 metadata:
   name: {{ include "ui.fullname" . }}
   labels:
@@ -8,10 +13,21 @@ spec:
 {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
 {{- end }}
+  {{- if .Values.rollout.enabled }}
+  revisionHistoryLimit: {{ .Values.rollout.revisionHistoryLimit }}
+  strategy:
+    blueGreen:
+      activeService: {{ include "ui.fullname" . }}-active
+      previewService: {{ include "ui.fullname" . }}-preview
+      autoPromotionEnabled: {{ .Values.rollout.autoPromotionEnabled }}
+      previewReplicaCount: {{ .Values.rollout.previewReplicaCount }}
+      scaleDownDelaySeconds: {{ .Values.rollout.scaleDownDelaySeconds }}
+  {{- else }}
   strategy:
     rollingUpdate:
       maxUnavailable: 1
     type: RollingUpdate
+  {{- end }}
   selector:
     matchLabels:
       {{- include "ui.selectorLabels" . | nindent 6 }}
@@ -19,6 +35,7 @@ spec:
     metadata:
       {{- if or .Values.podAnnotations .Values.metrics.enabled }}
       annotations:
+        retail/secret-revision: {{ .Values.secretRevision | quote }}
         {{- include "ui.podAnnotations" . | nindent 8 }}
         {{- if and .Values.opentelemetry.enabled .Values.opentelemetry.instrumentation }}
         instrumentation.opentelemetry.io/inject-sdk: {{ .Values.opentelemetry.instrumentation }}
@@ -41,6 +58,9 @@ spec:
       containers:
         - name: {{ "ui" }}
           env:
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
             - name: JAVA_OPTS
               value: -XX:MaxRAMPercentage=75.0 -Djava.security.egd=file:/dev/urandom
             - name: METADATA_KUBERNETES_POD_NAME
@@ -58,6 +78,10 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "ui.configMapName" . }}
+            {{- range .Values.envFromSecrets }}
+            - secretRef:
+                name: {{ . | quote }}
+            {{- end }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           image: "{{ .Values.image.repository }}{{ if .Values.image.digest }}@{{ .Values.image.digest }}{{ else }}:{{ .Values.image.tag | default .Chart.Version }}{{ end }}"
@@ -74,9 +98,15 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
             - mountPath: /tmp
               name: tmp-volume
       volumes:
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         - name: tmp-volume
           emptyDir:
             medium: Memory

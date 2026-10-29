@@ -38,7 +38,7 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: {{ $fullName }}
+                name: {{ $fullName }}{{ if $.Values.rollout.enabled }}-active{{ end }}
                 port:
                   number: {{ $svcPort }}
     {{- end }}
@@ -49,7 +49,7 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: {{ $fullName }}
+                name: {{ $fullName }}{{ if $.Values.rollout.enabled }}-active{{ end }}
                 port:
                   number: {{ $svcPort }}
     {{- end }}
@@ -93,7 +93,7 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: {{ $fullName }}
+                name: {{ $fullName }}{{ if $.Values.rollout.enabled }}-active{{ end }}
                 port:
                   number: {{ $svcPort }}
     {{- end }}
@@ -104,7 +104,7 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: {{ $fullName }}
+                name: {{ $fullName }}{{ if $.Values.rollout.enabled }}-active{{ end }}
                 port:
                   number: {{ $svcPort }}
     {{- end }}

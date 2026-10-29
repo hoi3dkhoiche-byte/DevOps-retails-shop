@@ -220,7 +220,7 @@ class CypressGateRevalidationTests(unittest.TestCase):
         snapshot = {service: {"image_id": image["image_id"], "config_digest": image["image_id"]}
                     for service, image in self.metadata["images"].items()}
         self.evidence = {"status": "passed", "mode": "compose", "source_commit": self.metadata["source_commit"],
-                         "run": self.metadata["run"], "backend_profile": "upstream",
+                         "run": self.metadata["run"], "backend_profile": "mysql-redis-opensearch",
                          "cypress": e2e.junit_results(list(reversed(self.native)), False),
                          "identity_checks": [snapshot, copy.deepcopy(snapshot)],
                          "orders_persistence": {"orders_before_restart": 1, "database_rows": 1,

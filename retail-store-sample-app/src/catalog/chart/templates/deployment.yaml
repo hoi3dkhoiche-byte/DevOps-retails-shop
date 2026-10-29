@@ -19,6 +19,7 @@ spec:
     metadata:
       {{- if or .Values.podAnnotations .Values.metrics.enabled }}
       annotations:
+        retail/secret-revision: {{ .Values.secretRevision | quote }}
         {{- include "catalog.podAnnotations" . | nindent 8 }}
         {{- if and .Values.opentelemetry.enabled .Values.opentelemetry.instrumentation }}
         instrumentation.opentelemetry.io/inject-sdk: {{ .Values.opentelemetry.instrumentation }}
@@ -40,12 +41,20 @@ spec:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: {{ "catalog" }}
+          {{- with .Values.extraEnv }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           envFrom:
             - configMapRef:
                 name: {{ include "catalog.configMapName" . }}
             {{- if or (eq "mysql" .Values.app.persistence.provider) (.Values.app.search.enabled) }}
             - secretRef:
                 name: {{ .Values.app.persistence.secret.name }}
+            {{- end }}
+            {{- range .Values.envFromSecrets }}
+            - secretRef:
+                name: {{ . | quote }}
             {{- end }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
@@ -62,9 +71,15 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
             - mountPath: /tmp
               name: tmp-volume
       volumes:
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         - name: tmp-volume
           emptyDir:
             medium: Memory

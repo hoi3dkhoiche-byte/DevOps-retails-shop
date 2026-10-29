@@ -19,6 +19,7 @@ spec:
     metadata:
       {{- if or .Values.podAnnotations .Values.metrics.enabled }}
       annotations:
+        retail/secret-revision: {{ .Values.secretRevision | quote }}
         {{- include "orders.podAnnotations" . | nindent 8 }}
         {{- if and .Values.opentelemetry.enabled .Values.opentelemetry.instrumentation }}
         instrumentation.opentelemetry.io/inject-sdk: {{ .Values.opentelemetry.instrumentation }}
@@ -41,6 +42,9 @@ spec:
       containers:
         - name: {{ "orders" }}
           env:
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
             - name: JAVA_OPTS
               value: -XX:MaxRAMPercentage=75.0 -Djava.security.egd=file:/dev/urandom
           envFrom:
@@ -54,6 +58,10 @@ spec:
             {{- end }}
             - configMapRef:
                 name: {{ include "orders.configMapName" . }}
+            {{- range .Values.envFromSecrets }}
+            - secretRef:
+                name: {{ . | quote }}
+            {{- end }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           image: "{{ .Values.image.repository }}{{ if .Values.image.digest }}@{{ .Values.image.digest }}{{ else }}:{{ .Values.image.tag | default .Chart.Version }}{{ end }}"
@@ -70,9 +78,15 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
             - mountPath: /tmp
               name: tmp-volume
       volumes:
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         - name: tmp-volume
           emptyDir:
             medium: Memory

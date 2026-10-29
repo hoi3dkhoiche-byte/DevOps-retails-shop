@@ -88,7 +88,7 @@ class E2E:
         self.name, self.namespace = f"retail-ci-{run_id}-{attempt}", "retail-ci"
         self.kubeconfig = APP / "dist/ci/runtime" / (self.name + ".yaml")
         self.context, self.forwards, self.started, self.manifest = "kind-" + self.name, {}, False, None
-        self.evidence = {"mode": mode, "backend_profile": "upstream", "identity_checks": []}
+        self.evidence = {"mode": mode, "backend_profile": "mysql-redis-opensearch", "identity_checks": []}
 
     def run(self, args, timeout=180, cwd=APP, binary=False):
         args = [str(arg) for arg in args]
@@ -186,22 +186,23 @@ class E2E:
         values = {"fullnameOverride": RELEASE[service],
                   "image": {"repository": image["repository"], "tag": image["tag"], "digest": "", "pullPolicy": "Never"},
                   "resources": {"requests": {"cpu": "100m", "memory": "128Mi"}, "limits": {"memory": "512Mi"}}}
-        if service == "catalog":
-            values.update({"app": {"persistence": {"provider": "mysql", "database": "catalogdb",
-                           "secret": {"name": "catalog-db", "username": "catalog_user", "password": "ci-only-password"}}},
-                           "mysql": {"create": True}})
-        elif service == "cart":
-            values.update({"app": {"persistence": {"provider": "dynamodb", "dynamodb": {"createTable": True}}},
-                           "dynamodb": {"create": True}})
-        elif service == "orders":
-            values.update({"app": {"persistence": {"provider": "postgres", "database": "orders",
-                           "secret": {"name": "orders-db", "username": "orders_user", "password": "ci-only-password"}},
-                           "messaging": {"provider": "rabbitmq", "rabbitmq": {
-                           "secret": {"name": "orders-rabbitmq", "username": "rabbitmq", "password": "ci-only-password"}}}},
-                           "postgresql": {"create": True}, "rabbitmq": {"create": True}})
+        if service in ("catalog", "cart", "orders"):
+            values["app"] = {"persistence": {"provider": "mysql"}}
+            prefix = "RETAIL_" + service.upper() + "_PERSISTENCE_"
+            settings = {"ENDPOINT": "mysql:3306", "PASSWORD": "ci-only-password"}
+            if service == "catalog":
+                settings.update(DB_NAME="catalog_ci", USER="catalog_user")
+            else:
+                settings.update(USERNAME=service + "_user", SSL_MODE="DISABLED")
+                settings["DATABASE" if service == "cart" else "NAME"] = service + "_ci"
+            values["extraEnv"] = [{"name": prefix + key, "value": value} for key, value in settings.items()]
+            if service == "orders":
+                values["app"]["messaging"] = {"provider": "rabbitmq", "rabbitmq": {
+                    "secret": {"name": "orders-rabbitmq", "username": "rabbitmq", "password": "ci-only-password"}}}
+                values["rabbitmq"] = {"create": True}
         elif service == "checkout":
             values.update({"app": {"persistence": {"provider": "redis"}, "endpoints": {"orders": "http://orders:80"}},
-                           "redis": {"create": True}})
+                           "redis": {"create": True}, "extraEnv": [{"name": "RETAIL_CHECKOUT_PERSISTENCE_REDIS_KEY_PREFIX", "value": "retail:ci:"}]})
         else:
             values["app"] = {"endpoints": {"catalog": "http://catalog:80", "carts": "http://carts:80",
                                           "checkout": "http://checkout:80", "orders": "http://orders:80"},
@@ -217,6 +218,8 @@ class E2E:
         self.run(["kind", "create", "cluster", "--name", self.name, "--kubeconfig", self.kubeconfig,
                   "--image", image, "--wait", "180s"], timeout=360)
         self.run(self.kubectl("create", "namespace", self.namespace))
+        self.run(self.kubectl("apply", "-f", "scripts/ci/fixtures/mysql.json"))
+        self.run(self.kubectl("rollout", "status", "statefulset/mysql", "--timeout=600s"), timeout=630)
         for service in SERVICES:
             self.run(["kind", "load", "image-archive", "--name", self.name,
                       self.directory / self.manifest["images"][service]["archive"]], timeout=300)
@@ -302,7 +305,7 @@ class E2E:
     def smoke(self):
         for service in SERVICES:
             self.wait_http(service, HEALTH[service])
-        for service, provider in (("catalog", "mysql"), ("cart", "dynamodb"), ("orders", "postgres")):
+        for service, provider in (("catalog", "mysql"), ("cart", "mysql"), ("orders", "mysql")):
             topology = json.loads(self.http(service, "/topology"))
             require(topology.get("persistenceProvider") == provider, "Wrong backend provider: " + service)
             if service == "orders":
@@ -329,14 +332,14 @@ class E2E:
     def persistence(self):
         before = json.loads(self.http("orders", "/orders"))
         require(bool(before), "Cypress did not create an order in the real Orders backend")
-        query = ["psql", "-U", "orders_user", "-d", "orders", "-tAc", "select count(*) from orders;"]
+        query = ["env", "MYSQL_PWD=ci-only-password", "mysql", "-h127.0.0.1", "-uorders_user", "orders_ci", "-Nse", "select count(*) from orders;"]
         if self.mode == "kind":
-            count = self.run(self.kubectl("exec", "orders-postgresql-0", "--", *query))
+            count = self.run(self.kubectl("exec", "mysql-0", "--", *query))
             self.run(self.kubectl("rollout", "restart", "deployment/orders"))
             self.run(self.kubectl("rollout", "status", "deployment/orders", "--timeout=300s"), timeout=330)
             self.start_forward("orders")
         else:
-            count = self.run(self.compose("exec", "-T", "orders-db", *query))
+            count = self.run(self.compose("exec", "-T", "mysql", *query))
             self.run(self.compose("restart", "orders"), timeout=90)
         require(int(count.strip()) >= len(before), "SQL did not contain submitted orders")
         self.wait_http("orders", HEALTH["orders"])

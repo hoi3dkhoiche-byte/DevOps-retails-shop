@@ -1,0 +1,37 @@
+fullnameOverride: carts
+replicaCount: 1
+resources:
+  requests:
+    cpu: 200m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: workload
+          operator: In
+          values:
+          - dev
+tolerations:
+- key: workload
+  operator: Equal
+  value: dev
+  effect: NoSchedule
+envFromSecrets:
+- cart-runtime
+secretRevision: initial
+service:
+  type: ClusterIP
+  port: 80
+extraVolumes:
+- name: rds-ca
+  configMap:
+    name: rds-ca
+extraVolumeMounts:
+- name: rds-ca
+  mountPath: /etc/retail/tls
+  readOnly: true

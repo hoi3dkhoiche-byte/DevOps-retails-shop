@@ -1,0 +1,45 @@
+nodeSelector:
+  workload: management
+tolerations:
+- key: workload
+  operator: Equal
+  value: management
+  effect: NoSchedule
+credentials:
+  useSecret: false
+serviceAccount:
+  server:
+    create: true
+    name: velero
+    annotations: {}
+snapshotsEnabled: false
+deployNodeAgent: false
+configuration:
+  backupStorageLocation:
+  - name: default
+    provider: aws
+    bucket: REPLACE_BACKUP_BUCKET
+    prefix: velero
+    config:
+      region: ap-southeast-1
+initContainers:
+- name: aws-plugin
+  image: velero/velero-plugin-for-aws:v1.14.0
+  volumeMounts:
+  - mountPath: /target
+    name: plugins
+schedules:
+  retail-daily:
+    schedule: 0 19 * * *
+    template:
+      ttl: 336h0m0s
+      includedNamespaces:
+      - retail-dev
+      - retail-prod
+      - argocd
+      - argo-rollouts
+      - external-secrets
+      - monitoring
+      excludedResources:
+      - secrets
+      snapshotVolumes: false

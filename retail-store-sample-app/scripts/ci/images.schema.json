@@ -42,7 +42,7 @@
       "const": "linux/amd64"
     },
     "backend_profile": {
-      "const": "upstream"
+      "const": "mysql-redis-opensearch"
     },
     "images": {
       "type": "object",

@@ -21,6 +21,7 @@ export default () => ({
     provider: process.env.RETAIL_CHECKOUT_PERSISTENCE_PROVIDER || 'in-memory',
     redis: {
       url: process.env.RETAIL_CHECKOUT_PERSISTENCE_REDIS_URL || '',
+      keyPrefix: process.env.RETAIL_CHECKOUT_PERSISTENCE_REDIS_KEY_PREFIX || '',
       reader: {
         url: process.env.RETAIL_CHECKOUT_PERSISTENCE_REDIS_READER_URL || '',
       },

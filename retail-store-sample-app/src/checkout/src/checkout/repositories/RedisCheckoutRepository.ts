@@ -30,10 +30,11 @@ export class RedisCheckoutRepository
   constructor(
     private url: string,
     private readerUrl: string,
+    private keyPrefix: string = '',
   ) {}
 
   private async buildClient(url: string) {
-    return new Redis(url);
+    return new Redis(url, { keyPrefix: this.keyPrefix });
   }
 
   async client() {

@@ -1,0 +1,42 @@
+fullnameOverride: catalog
+replicaCount: 1
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: workload
+          operator: In
+          values:
+          - dev
+tolerations:
+- key: workload
+  operator: Equal
+  value: dev
+  effect: NoSchedule
+envFromSecrets:
+- catalog-runtime
+- catalog-opensearch-runtime
+secretRevision: initial
+service:
+  type: ClusterIP
+  port: 80
+app:
+  persistence:
+    secret:
+      create: false
+extraVolumes:
+- name: rds-ca
+  configMap:
+    name: rds-ca
+extraVolumeMounts:
+- name: rds-ca
+  mountPath: /etc/retail/tls
+  readOnly: true

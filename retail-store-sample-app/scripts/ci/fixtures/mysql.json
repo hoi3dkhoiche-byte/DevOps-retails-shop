@@ -1,0 +1,117 @@
+{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    {
+      "apiVersion": "v1",
+      "kind": "ConfigMap",
+      "metadata": {
+        "name": "ci-mysql-init"
+      },
+      "data": {
+        "10-retail.sh": "#!/bin/sh\nset -eu\n# Disposable local/CI fixture only. AWS credentials are bootstrapped out of band.\nfor service in catalog cart orders; do\n  MYSQL_PWD=\"$MYSQL_ROOT_PASSWORD\" mysql -uroot <<SQL\nCREATE DATABASE IF NOT EXISTS ${service}_ci;\nCREATE USER IF NOT EXISTS '${service}_user'@'%' IDENTIFIED BY 'ci-only-password';\nGRANT ALL PRIVILEGES ON ${service}_ci.* TO '${service}_user'@'%';\nSQL\ndone\n"
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "Service",
+      "metadata": {
+        "name": "mysql"
+      },
+      "spec": {
+        "selector": {
+          "app": "ci-mysql"
+        },
+        "ports": [
+          {
+            "port": 3306
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "apps/v1",
+      "kind": "StatefulSet",
+      "metadata": {
+        "name": "mysql"
+      },
+      "spec": {
+        "serviceName": "mysql",
+        "replicas": 1,
+        "selector": {
+          "matchLabels": {
+            "app": "ci-mysql"
+          }
+        },
+        "template": {
+          "metadata": {
+            "labels": {
+              "app": "ci-mysql"
+            }
+          },
+          "spec": {
+            "containers": [
+              {
+                "name": "mysql",
+                "image": "mysql:8.4.11",
+                "env": [
+                  {
+                    "name": "MYSQL_ROOT_PASSWORD",
+                    "value": "ci-only-root-password"
+                  }
+                ],
+                "ports": [
+                  {
+                    "containerPort": 3306
+                  }
+                ],
+                "resources": {
+                  "requests": {
+                    "cpu": "100m",
+                    "memory": "256Mi"
+                  },
+                  "limits": {
+                    "memory": "1Gi"
+                  }
+                },
+                "volumeMounts": [
+                  {
+                    "name": "init",
+                    "mountPath": "/docker-entrypoint-initdb.d"
+                  },
+                  {
+                    "name": "data",
+                    "mountPath": "/var/lib/mysql"
+                  }
+                ],
+                "readinessProbe": {
+                  "exec": {
+                    "command": [
+                      "sh",
+                      "-c",
+                      "MYSQL_PWD=$MYSQL_ROOT_PASSWORD mysql -h127.0.0.1 -uroot -e \"SELECT 1\""
+                    ]
+                  },
+                  "periodSeconds": 5,
+                  "failureThreshold": 60
+                }
+              }
+            ],
+            "volumes": [
+              {
+                "name": "init",
+                "configMap": {
+                  "name": "ci-mysql-init"
+                }
+              },
+              {
+                "name": "data",
+                "emptyDir": {}
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}
