@@ -120,6 +120,8 @@ Profile `mysql-redis-opensearch` dùng một MySQL 8.4.11 với database/user ri
 
 Fixture Java/MySQL dùng `sslMode=REQUIRED` để đăng nhập qua TLS ngay khi server vừa tạo user. RDS dùng `VERIFY_IDENTITY` và CA Singapore được mount từ ConfigMap; không sao chép cấu hình xác minh của fixture sang production.
 
+Compose mount `src/app/mysql-init.sql`; ConfigMap của Kind dùng cùng nội dung dưới tên `10-retail.sql`. Entrypoint MySQL tự chạy SQL bằng socket và tài khoản root của temporary server, kể cả khi TCP chưa mở. Kind đặt socket tại `/var/lib/mysql/ci-fixture.sock` để kiểm tra trường hợp khác mặc định của client; readiness và kiểm tra persistence dùng TCP, xác thực đủ ba user/database ứng dụng.
+
 E2E yêu cầu submit đơn qua backend thật, đọc record MySQL của Orders, restart rồi đối chiếu đơn hàng. Cart phải giữ đúng quantity và unit price sau restart; gate kiểm tra SQL, API và image ID trước/sau restart. Các bài kiểm tra local/Kind chưa nghiệm thu khả năng HA của tài nguyên AWS.
 
 ## Timeout, concurrency và artifacts

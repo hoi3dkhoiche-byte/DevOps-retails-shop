@@ -4,7 +4,7 @@ Lượt kiểm tra local ngày 30/10/2026, trên worktree có thay đổi chưa 
 
 | Kiểm tra                           | Kết quả                                                                                         |
 | ---------------------------------- | ----------------------------------------------------------------------------------------------- |
-| CI evidence/gate contracts         | 37 test đạt trên Linux, gồm hồi quy MySQL init                                                  |
+| CI evidence/gate contracts         | 35 test đạt trên Linux, gồm đồng bộ fixture SQL                                                 |
 | GitOps release/promotion contracts | 20 test đạt                                                                                     |
 | Terraform/bootstrap contracts      | 13 test đạt                                                                                     |
 | Cart                               | 19 test đạt với MySQL và fixture tương thích cũ                                                 |
@@ -27,14 +27,15 @@ Lượt smoke ban đầu gọi API và kiểm tra SQL/restart trực tiếp. Cá
 
 ## Hồi quy CI trên Linux ngày 30/10/2026
 
-Lượt GitHub Actions `40989506534` đã qua source/build/scan, nhưng E2E lỗi ở fixture MySQL. Script init được Git lưu với mode `100644`, nên entrypoint MySQL trên Linux source trực tiếp script. `set -u` bị lan sang entrypoint và gây lỗi `MYSQL_ONETIME_PASSWORD: unbound variable`. Bind mount từ Windows trong lượt smoke ban đầu không tái hiện đúng quyền file này.
+Lượt GitHub Actions `40989506534` lỗi do script MySQL làm lan `set -u` sang entrypoint. Sau bản sửa shell, lượt `41005765434` qua source/build/scan và hai mode Compose nhưng Kind vẫn lỗi: temporary server mở `/var/lib/mysql/mysql.sock`, còn client trong script tìm `/var/run/mysqld/mysqld.sock`, gây `ERROR 2002`. Container khởi động lại với dữ liệu init dở; user ứng dụng chưa được tạo nên readiness thất bại. Kiểm tra local trước đó dùng socket trùng mặc định client nên chưa bắt được lỗi này.
 
-Bản sửa giới hạn shell options trong subshell; readiness của Compose và Kind phải đăng nhập được cả ba database bằng user ứng dụng. Test hồi quy thực thi shell Linux kiểm tra startup thành công, giữ nguyên shell options của entrypoint và dừng startup khi SQL lỗi. Kind đồng bộ Redis `7.4.2-alpine`, đồng thời lưu log MySQL hiện tại/lần khởi động trước.
+Bản hiện tại dùng `mysql-init.sql` thay cho shell, để entrypoint MySQL tự chọn socket và root credentials cho SQL. Compose và ConfigMap Kind dùng cùng nội dung SQL. Kind đặt rõ socket `/var/lib/mysql/ci-fixture.sock` để luôn kiểm tra trường hợp khác mặc định client. Readiness vẫn phải đăng nhập được đủ ba database bằng user ứng dụng; không tăng timeout hoặc bỏ gate.
+
+Hồi quy thực tế với MySQL `8.4.11`: script cũ thất bại `ERROR 2002` trên socket khác mặc định; cùng image dùng SQL native khởi tạo thành công, không restart, xác thực đủ ba user trên database riêng. Test đồng bộ SQL thay thế hai test shell options đã hết áp dụng, nên tổng CI contracts hiện là 35.
 
 | Chế độ               | Cypress   | SQL và restart                                       | Image identity              |
 | -------------------- | --------- | ---------------------------------------------------- | --------------------------- |
-| Compose              | 14/14 đạt | 2 Orders còn nguyên; Cart quantity 3, unit price 123 | Đủ năm image ở ba thời điểm |
 | Compose + OpenSearch | 20/20 đạt | 2 Orders còn nguyên; Cart quantity 3, unit price 123 | Đủ năm image ở ba thời điểm |
 | Kind Kubernetes 1.35 | 14/14 đạt | 2 Orders còn nguyên; Cart quantity 3, unit price 123 | Đủ năm image ở ba thời điểm |
 
-Các lượt kiểm tra dùng source Cypress từ `git archive` trên filesystem Linux. Compose dùng file MySQL init mode `0644` với volume dữ liệu mới; Kind dùng ConfigMap init và cluster mới, kiểm checksum/config ID của đủ năm archive trước khi nạp. Report ở `.ci-tools/latest-failure/runtime/compose-verified`, `search-verified` và `.ci-tools/kind-runtime`. Cả ba luồng đã qua Cypress, SQL/restart và ba lần đối chiếu image; fixture/cluster được dọn sau khi kiểm tra. Đây là kiểm chứng local trên bộ image đã build, không phải bằng chứng publish của GitHub.
+Report hồi quy socket ở `.ci-tools/mysql-native-socket-regression`; E2E Compose với SQL native ở `.ci-tools/latest-failure/runtime/search-native-sql`; Kind ở `.ci-tools/kind-native-sql`. Kind đã xác nhận `@@socket=/var/lib/mysql/ci-fixture.sock`, MySQL không restart, cùng Cypress, SQL/restart và ba lần đối chiếu đủ năm image đều đạt. Các lượt kiểm tra dùng source Cypress từ `git archive` trên filesystem Linux, dữ liệu/cluster mới và dọn fixture sau khi xong. Đây là kiểm chứng local trên bộ image đã build, không phải bằng chứng publish của GitHub.
