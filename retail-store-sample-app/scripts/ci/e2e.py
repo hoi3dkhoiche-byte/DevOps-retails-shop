@@ -133,9 +133,12 @@ class E2E:
         return ["helm", *args, "--kubeconfig", self.kubeconfig, "--kube-context", self.context,
                 "--namespace", self.namespace]
 
-    def http(self, service, path, timeout=10):
-        with urllib.request.urlopen(f"http://127.0.0.1:{PORTS[service]}{path}", timeout=timeout) as response:
-            require(response.status == 200, "HTTP request failed")
+    def http(self, service, path, timeout=10, method="GET", data=None):
+        request = urllib.request.Request(f"http://127.0.0.1:{PORTS[service]}{path}",
+                                         data=json.dumps(data).encode() if data is not None else None,
+                                         headers={"Content-Type": "application/json"}, method=method)
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            require(response.status in ((200,) if method == "GET" else (200, 201, 202, 204)), "HTTP request failed")
             return response.read()
 
     def wait_http(self, service, path, seconds=300, predicate=None):
@@ -192,14 +195,15 @@ class E2E:
             settings = {"ENDPOINT": "mysql:3306", "PASSWORD": "ci-only-password"}
             if service == "catalog":
                 settings.update(DB_NAME="catalog_ci", USER="catalog_user")
+                values["app"]["persistence"].update(endpoint="mysql:3306", database="catalog_ci")
             else:
-                settings.update(USERNAME=service + "_user", SSL_MODE="DISABLED")
+                settings.update(USERNAME=service + "_user", SSL_MODE="REQUIRED")
                 settings["DATABASE" if service == "cart" else "NAME"] = service + "_ci"
             values["extraEnv"] = [{"name": prefix + key, "value": value} for key, value in settings.items()]
             if service == "orders":
                 values["app"]["messaging"] = {"provider": "rabbitmq", "rabbitmq": {
                     "secret": {"name": "orders-rabbitmq", "username": "rabbitmq", "password": "ci-only-password"}}}
-                values["rabbitmq"] = {"create": True}
+                values["rabbitmq"] = {"create": True, "image": {"tag": "4.2.0-management"}}
         elif service == "checkout":
             values.update({"app": {"persistence": {"provider": "redis"}, "endpoints": {"orders": "http://orders:80"}},
                            "redis": {"create": True}, "extraEnv": [{"name": "RETAIL_CHECKOUT_PERSISTENCE_REDIS_KEY_PREFIX", "value": "retail:ci:"}]})
@@ -347,6 +351,30 @@ class E2E:
         require({item["id"] for item in before} <= {item["id"] for item in after}, "Orders disappeared after restart")
         self.evidence["orders_persistence"] = {"orders_before_restart": len(before), "database_rows": int(count.strip()),
                                               "orders_after_restart": len(after)}
+        self.verify_kind() if self.mode == "kind" else self.verify_compose()
+        customer = self.name
+        item = {"itemId": "ci-persistence-item", "quantity": 3, "unitPrice": 123}
+        self.http("cart", f"/carts/{customer}/items", method="POST", data=item)
+        before_cart = json.loads(self.http("cart", f"/carts/{customer}/items"))
+        require(before_cart == [item], "Cart did not save the submitted quantity and price")
+        require(re.fullmatch(r"[a-z0-9-]+", customer), "Unsafe fixture customer identifier")
+        query = ["env", "MYSQL_PWD=ci-only-password", "mysql", "-h127.0.0.1", "-ucart_user", "cart_ci", "-Nse",
+                 f"SELECT quantity FROM cart_items WHERE customer_id='{customer}' AND item_id='ci-persistence-item';"]
+        if self.mode == "kind":
+            quantity = self.run(self.kubectl("exec", "mysql-0", "--", *query))
+            self.run(self.kubectl("rollout", "restart", "deployment/carts"))
+            self.run(self.kubectl("rollout", "status", "deployment/carts", "--timeout=300s"), timeout=330)
+            self.start_forward("cart")
+        else:
+            quantity = self.run(self.compose("exec", "-T", "mysql", *query))
+            self.run(self.compose("restart", "cart"), timeout=90)
+        require(int(quantity.strip()) == item["quantity"], "Cart SQL quantity differs from the API")
+        self.wait_http("cart", HEALTH["cart"])
+        after_cart = json.loads(self.http("cart", f"/carts/{customer}/items"))
+        require(after_cart == before_cart, "Cart contents changed after restart")
+        self.evidence["cart_persistence"] = {"items_before_restart": len(before_cart), "database_quantity": int(quantity.strip()),
+                                            "items_after_restart": len(after_cart), "quantity_after_restart": after_cart[0]["quantity"],
+                                            "unit_price_after_restart": after_cart[0]["unitPrice"]}
         self.verify_kind() if self.mode == "kind" else self.verify_compose()
 
     def diagnostics(self):

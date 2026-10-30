@@ -1,5 +1,8 @@
-release:
-  enabled: false
-  source_commit: ''
-  backend_profile: mysql-redis-opensearch
-images: {}
+{
+  "release": {
+    "enabled": false,
+    "source_commit": "",
+    "backend_profile": "mysql-redis-opensearch"
+  },
+  "images": {}
+}

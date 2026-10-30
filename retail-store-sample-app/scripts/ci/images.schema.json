@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Complete verified upstream-profile Retail release",
+  "title": "Complete verified MySQL-profile Retail release",
   "type": "object",
   "additionalProperties": false,
   "required": [

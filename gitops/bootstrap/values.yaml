@@ -1,1 +1,4 @@
 platform: true
+roles: {}
+alerting:
+  enabled: false

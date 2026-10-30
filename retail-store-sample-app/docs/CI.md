@@ -20,7 +20,7 @@ Workflow đọc namespace qua `vars`, username/token qua `secrets`. Secret Docke
 | Checkout | `hmannnguye/devops-retails-shop-checkout` |
 | Orders   | `hmannnguye/devops-retails-shop-orders`   |
 
-Cần xác nhận bốn repository có hậu tố và token đã được tạo, rồi điền Variable/Secrets trước khi publish thật. Repository GitOps là [`hoi3dkhoiche-byte/DevOps-retails-shop-gitops`](https://github.com/hoi3dkhoiche-byte/DevOps-retails-shop-gitops). CI app xuất hợp đồng image; chưa tự sửa hoặc đẩy commit vào repository GitOps.
+Cần xác nhận bốn repository có hậu tố và token đã được tạo, rồi điền Variable/Secrets trước khi publish thật. Repository GitOps là [`hoi3dkhoiche-byte/DevOps-retails-shop-gitops`](https://github.com/hoi3dkhoiche-byte/DevOps-retails-shop-gitops). CI app xuất hợp đồng image. Workflow [`gitops.yml`](../../.github/workflows/gitops.yml) tạo PR khi bật `GITOPS_ENABLED`; xem [hướng dẫn CD](../../scripts/gitops/README.md).
 
 ## Luồng kiểm tra và required check
 
@@ -53,7 +53,7 @@ Compose CI override khai báo image cho đủ năm service, xóa build và đặ
 
 `images[].image_id` luôn là **canonical image config digest**. Với Docker image store truyền thống, `.Id` chính là config digest. Docker 29 với containerd có thể trả manifest ID trong `.Id`; helper kiểm tra descriptor tương ứng rồi lấy annotation `config.digest`. Hash bytes của config trong archive vẫn phải khớp digest này. Không thay contract theo cách Docker store trình bày ID.
 
-Kind load đúng các archive, đặt image pull policy `Never` và dùng các Helm chart hiện có. Script đọc imageID của Pod trên đúng node tạm rồi phân giải manifest/index về config digest trong containerd; không mặc định runtime manifest digest bằng local image ID. Có kiểm tra lại identity sau khi restart Orders.
+Kind load đúng các archive, đặt image pull policy `Never` và dùng các Helm chart hiện có. Script đọc imageID của Pod trên đúng node tạm rồi phân giải manifest/index về config digest trong containerd; không mặc định runtime manifest digest bằng local image ID. Có kiểm tra lại identity sau khi restart Orders và Cart.
 
 Trivy quét OS và library của chính năm archive. HIGH/CRITICAL, lỗi scanner hoặc thiếu report đều chặn gate. Không có `continue-on-error`, bỏ qua vulnerability chưa sửa hay rebuild sau scan.
 
@@ -71,7 +71,7 @@ Schema chuẩn nằm ở [`../scripts/ci/images.schema.json`](../scripts/ci/imag
 | `source_commit`   | Full commit SHA của checkout đã kiểm tra; PR dùng merge checkout của GitHub |
 | `run`             | `id`, `attempt`, `url`                                                      |
 | `platform`        | `linux/amd64`                                                               |
-| `backend_profile` | `upstream`                                                                  |
+| `backend_profile` | `mysql-redis-opensearch`                                                    |
 | `images`          | Đủ và chỉ đủ `ui`, `catalog`, `cart`, `checkout`, `orders`                  |
 | Mỗi image         | `repository`, `tag`, `digest`, `reference`, `image_id`                      |
 
@@ -99,7 +99,7 @@ release = {
         "url": "https://github.com/hoi3dkhoiche-byte/DevOps-retails-shop/actions/runs/123/attempts/1",
     },
     "platform": "linux/amd64",
-    "backend_profile": "upstream",
+    "backend_profile": "mysql-redis-opensearch",
     "images": {},
 }
 for service, name in repositories.items():
@@ -116,9 +116,11 @@ print(json.dumps(release, indent=2))
 
 Consumer GitOps phải validate schema, đủ năm service và profile đã được nghiệm thu rồi render **`repository@sha256:...`**. Năm chart app hỗ trợ `image.digest`, ưu tiên digest khi có giá trị; `image.tag` chỉ dùng khi digest rỗng. Static check kiểm tra mỗi chart render được digest reference.
 
-Profile hiện tại dùng Catalog MySQL/MariaDB, Cart DynamoDB Local, Orders PostgreSQL, Checkout Redis và RabbitMQ/OpenSearch. **PostgreSQL cho Catalog/Cart chưa được nghiệm thu.** Không đổi provider/endpoint rồi coi là migration. Khi adapter và migration thực sự có, cần cập nhật fixture, test, tracing, schema/profile và điều kiện chấp nhận bên GitOps riêng.
+Profile `mysql-redis-opensearch` dùng một MySQL 8.4.11 với database/user riêng cho Catalog, Cart và Orders; Checkout dùng Redis; RabbitMQ và OpenSearch là fixture riêng. Cart có adapter JDBC/Flyway mới, Orders có migration MySQL riêng. AWS dùng một RDS và tách database/user theo service và môi trường. Redis tách key prefix/ACL; OpenSearch tách index/role. PostgreSQL và DynamoDB không thuộc profile phát hành mới.
 
-E2E hiện yêu cầu submit đơn qua backend thật, đọc số record PostgreSQL của Orders, restart ứng dụng và đối chiếu lại đơn hàng. Điều này không chứng minh EFS/RDS HA hoặc kiến trúc runtime AWS.
+Fixture Java/MySQL dùng `sslMode=REQUIRED` để đăng nhập qua TLS ngay khi server vừa tạo user. RDS dùng `VERIFY_IDENTITY` và CA Singapore được mount từ ConfigMap; không sao chép cấu hình xác minh của fixture sang production.
+
+E2E yêu cầu submit đơn qua backend thật, đọc record MySQL của Orders, restart rồi đối chiếu đơn hàng. Cart phải giữ đúng quantity và unit price sau restart; gate kiểm tra SQL, API và image ID trước/sau restart. Các bài kiểm tra local/Kind chưa nghiệm thu khả năng HA của tài nguyên AWS.
 
 ## Timeout, concurrency và artifacts
 

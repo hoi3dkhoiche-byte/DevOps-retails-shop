@@ -32,6 +32,27 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
+  name: retail-argocd-secrets
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-3"
+spec:
+  project: retail-platform
+  source:
+    repoURL: {{ .Values.gitopsRepo | quote }}
+    targetRevision: {{ .Values.gitopsRevision | quote }}
+    path: argocd-secrets
+    helm:
+      valueFiles: [../config.yaml]
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated: {selfHeal: true, prune: false}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
   name: retail-platform-resources
   namespace: argocd
   annotations:
@@ -69,6 +90,7 @@ spec:
       targetRevision: {{ $version.version | quote }}
       helm:
         releaseName: {{ $chart }}
+        skipTests: true
         valueFiles:
           - $values/platform/{{ $chart }}.yaml
     - repoURL: {{ $.Values.gitopsRepo | quote }}

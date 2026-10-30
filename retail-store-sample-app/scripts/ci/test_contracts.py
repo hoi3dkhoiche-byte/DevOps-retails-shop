@@ -222,7 +222,10 @@ class CypressGateRevalidationTests(unittest.TestCase):
         self.evidence = {"status": "passed", "mode": "compose", "source_commit": self.metadata["source_commit"],
                          "run": self.metadata["run"], "backend_profile": "mysql-redis-opensearch",
                          "cypress": e2e.junit_results(list(reversed(self.native)), False),
-                         "identity_checks": [snapshot, copy.deepcopy(snapshot)],
+                         "identity_checks": [snapshot, copy.deepcopy(snapshot), copy.deepcopy(snapshot)],
+                         "cart_persistence": {"items_before_restart": 1, "items_after_restart": 1,
+                                              "database_quantity": 3, "quantity_after_restart": 3,
+                                              "unit_price_after_restart": 123},
                          "orders_persistence": {"orders_before_restart": 1, "database_rows": 1,
                                                 "orders_after_restart": 1}}
 
@@ -234,6 +237,17 @@ class CypressGateRevalidationTests(unittest.TestCase):
             with self.subTest(mode=mode):
                 gate.validate_e2e(value, self.metadata, mode, self.native)
                 self.assertEqual(value, original)
+
+    def test_missing_or_changed_cart_persistence_proof_fails(self):
+        for field in ("database_quantity", "quantity_after_restart", "unit_price_after_restart"):
+            value = copy.deepcopy(self.evidence)
+            value["cart_persistence"][field] = 0
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                gate.validate_e2e(value, self.metadata, "compose", self.native)
+        value = copy.deepcopy(self.evidence)
+        del value["cart_persistence"]
+        with self.assertRaises(ValueError):
+            gate.validate_e2e(value, self.metadata, "compose", self.native)
 
     def test_missing_extra_or_duplicated_names_still_fail(self):
         for names in (["shared name"],

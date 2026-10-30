@@ -22,7 +22,11 @@ resource "aws_eks_cluster" "retail" {
     public_access_cidrs     = var.admin_cidrs
   }
   enabled_cluster_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
-  depends_on                = [aws_iam_role_policy_attachment.cluster]
+  depends_on                = [aws_iam_role_policy_attachment.cluster, aws_cloudwatch_log_group.eks]
+}
+resource "aws_cloudwatch_log_group" "eks" {
+  name              = "/aws/eks/${local.name}/cluster"
+  retention_in_days = 7
 }
 resource "aws_eks_access_entry" "admin" {
   cluster_name  = aws_eks_cluster.retail.name
@@ -108,6 +112,12 @@ resource "aws_eks_addon" "base" {
   addon_name               = each.key
   addon_version            = each.value
   service_account_role_arn = each.key == "aws-ebs-csi-driver" ? aws_iam_role.workload["ebs-csi"].arn : null
-  configuration_values     = each.key == "coredns" ? jsonencode({ tolerations = [{ key = "workload", operator = "Exists", effect = "NoSchedule" }] }) : null
-  depends_on               = [aws_eks_node_group.role]
+  configuration_values = each.key == "coredns" ? jsonencode({
+    nodeSelector = { workload = "management" }
+    tolerations  = [{ key = "workload", operator = "Equal", value = "management", effect = "NoSchedule" }]
+    }) : each.key == "aws-ebs-csi-driver" ? jsonencode({ controller = {
+      nodeSelector = { workload = "management" }
+      tolerations  = [{ key = "workload", operator = "Equal", value = "management", effect = "NoSchedule" }]
+  } }) : null
+  depends_on = [aws_eks_node_group.role]
 }

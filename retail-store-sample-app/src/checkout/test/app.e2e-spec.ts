@@ -23,17 +23,18 @@ import { AppModule } from './../src/app.module';
 import { StartedTestContainer, Wait } from 'testcontainers';
 import { GenericContainer } from 'testcontainers';
 import { ConfigModule } from '@nestjs/config';
+import { RedisCheckoutRepository } from '../src/checkout/repositories/RedisCheckoutRepository';
 
-jest.setTimeout(30000); // 30 seconds
+jest.setTimeout(120000); // Includes cold fixture pull and application bootstrap.
 
 describe('AppController (e2e)', () => {
   let app: INestApplication;
   let redisContainer: StartedTestContainer;
 
   beforeAll(async () => {
-    redisContainer = await new GenericContainer('redis:6.0-alpine')
+    redisContainer = await new GenericContainer('redis:7.4.2-alpine')
       .withExposedPorts(6379)
-      .withStartupTimeout(20000) // 20 seconds startup timeout
+      .withStartupTimeout(90000)
       .withWaitStrategy(Wait.forLogMessage('Ready to accept connections'))
       .start();
 
@@ -63,8 +64,12 @@ describe('AppController (e2e)', () => {
   });
 
   afterAll(async () => {
-    await app.close();
-    await redisContainer.stop();
+    if (app) {
+      await app.close();
+    }
+    if (redisContainer) {
+      await redisContainer.stop();
+    }
   });
 
   it('/health (GET)', () => {
@@ -80,6 +85,24 @@ describe('AppController (e2e)', () => {
       .post('/checkout/test124/update')
       .send(valid)
       .expect(201);
+  });
+
+  it('keeps dev and prod customer data separate on the same Redis server', async () => {
+    const url = `redis://${redisContainer.getHost()}:${redisContainer.getMappedPort(6379)}`;
+    const dev = new RedisCheckoutRepository(url, url, 'retail:dev:');
+    const prod = new RedisCheckoutRepository(url, url, 'retail:prod:');
+    try {
+      await dev.set('shared-customer', 'dev-checkout');
+      await prod.set('shared-customer', 'prod-checkout');
+      expect(await dev.get('shared-customer')).toBe('dev-checkout');
+      expect(await prod.get('shared-customer')).toBe('prod-checkout');
+      await dev.remove('shared-customer');
+      expect(await dev.get('shared-customer')).toBeNull();
+      expect(await prod.get('shared-customer')).toBe('prod-checkout');
+    } finally {
+      await dev.onModuleDestroy();
+      await prod.onModuleDestroy();
+    }
   });
 });
 

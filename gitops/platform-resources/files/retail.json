@@ -1,0 +1,266 @@
+{
+  "uid": "retail-lab",
+  "title": "Retail lab applications and AWS",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "namespace",
+        "type": "custom",
+        "query": "retail-dev,retail-prod",
+        "current": {
+          "text": "retail-dev",
+          "value": "retail-dev"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Pod CPU",
+      "type": "timeseries",
+      "datasource": {
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cores"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=~\"$namespace\",container!=\"\"}[5m]))",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Pod working memory",
+      "type": "timeseries",
+      "datasource": {
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (pod) (container_memory_working_set_bytes{namespace=~\"$namespace\",container!=\"\"})",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "UI HPA replicas",
+      "type": "timeseries",
+      "datasource": {
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "targets": [
+        {
+          "expr": "kube_horizontalpodautoscaler_status_current_replicas{namespace=~\"$namespace\"}",
+          "legendFormat": "current",
+          "refId": "A"
+        },
+        {
+          "expr": "kube_horizontalpodautoscaler_status_desired_replicas{namespace=~\"$namespace\"}",
+          "legendFormat": "desired",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "UI rollout availability",
+      "type": "timeseries",
+      "datasource": {
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "targets": [
+        {
+          "expr": "rollout_info_replicas_available{namespace=~\"$namespace\"}",
+          "legendFormat": "available",
+          "refId": "A"
+        },
+        {
+          "expr": "rollout_info_replicas_desired{namespace=~\"$namespace\"}",
+          "legendFormat": "desired",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Java HTTP 5xx per second",
+      "type": "timeseries",
+      "datasource": {
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (job) (rate(http_server_requests_seconds_count{namespace=~\"$namespace\",status=~\"5..\"}[5m]))",
+          "legendFormat": "{{job}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Application targets up",
+      "type": "timeseries",
+      "datasource": {
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "targets": [
+        {
+          "expr": "up{namespace=~\"$namespace\"}",
+          "legendFormat": "{{job}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "ALB target 5xx",
+      "type": "timeseries",
+      "datasource": {
+        "uid": "cloudwatch"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "namespace": "AWS/ApplicationELB",
+          "metricName": "HTTPCode_Target_5XX_Count",
+          "dimensions": {
+            "LoadBalancer": [
+              "*"
+            ]
+          },
+          "region": "ap-southeast-1",
+          "statistic": "Sum",
+          "period": "300",
+          "matchExact": false,
+          "metricQueryType": 0,
+          "metricEditorMode": 0
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "RDS CPU",
+      "type": "timeseries",
+      "datasource": {
+        "uid": "cloudwatch"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "namespace": "AWS/RDS",
+          "metricName": "CPUUtilization",
+          "dimensions": {
+            "DBInstanceIdentifier": [
+              "retail-lab-mysql"
+            ]
+          },
+          "region": "ap-southeast-1",
+          "statistic": "Average",
+          "period": "300",
+          "matchExact": false,
+          "metricQueryType": 0,
+          "metricEditorMode": 0
+        }
+      ]
+    }
+  ]
+}

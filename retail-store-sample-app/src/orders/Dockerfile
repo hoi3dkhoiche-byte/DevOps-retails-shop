@@ -21,11 +21,11 @@ COPY .mvn .mvn
 COPY --chmod=0755 mvnw .
 COPY pom.xml .
 
-RUN ./mvnw dependency:go-offline -B -q
-
 COPY ./src ./src
 
-RUN ./mvnw -DskipTests package -q && \
+# Resolve only the package build dependencies, retaining a BuildKit Maven cache.
+# go-offline also resolves reporting/plugin artifacts that are not needed here.
+RUN --mount=type=cache,target=/root/.m2 ./mvnw -DskipTests package -B -ntp && \
     mv /target/orders-0.0.1-SNAPSHOT.jar /app.jar
 
 # Package Stage

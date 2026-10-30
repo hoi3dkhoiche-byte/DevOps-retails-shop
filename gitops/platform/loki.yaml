@@ -25,6 +25,8 @@ loki:
   compactor:
     retention_enabled: true
     delete_request_store: s3
+  image:
+    tag: 3.6.16
 singleBinary:
   nodeSelector:
     workload: management
@@ -61,3 +63,8 @@ serviceAccount:
   create: true
   name: loki
   annotations: {}
+fullnameOverride: loki
+test:
+  enabled: false
+lokiCanary:
+  enabled: false

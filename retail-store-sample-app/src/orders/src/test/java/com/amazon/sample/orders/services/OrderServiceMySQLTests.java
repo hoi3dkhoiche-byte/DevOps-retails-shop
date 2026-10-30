@@ -47,9 +47,7 @@ public class OrderServiceMySQLTests {
   @LocalServerPort
   private Integer port;
 
-  static MySQLContainer mysql = new MySQLContainer(
-    "mysql:8.4.11"
-  );
+  static MySQLContainer mysql = new MySQLContainer("mysql:8.4.11");
 
   @BeforeAll
   static void beforeAll() {
@@ -64,7 +62,7 @@ public class OrderServiceMySQLTests {
   @DynamicPropertySource
   static void configureProperties(DynamicPropertyRegistry registry) {
     registry.add("retail.orders.persistence.provider", () -> "mysql");
-    registry.add("retail.orders.persistence.ssl-mode", () -> "DISABLED");
+    registry.add("retail.orders.persistence.ssl-mode", () -> "REQUIRED");
     registry.add(
       "retail.orders.persistence.endpoint",
       () -> mysql.getHost() + ":" + mysql.getMappedPort(3306)

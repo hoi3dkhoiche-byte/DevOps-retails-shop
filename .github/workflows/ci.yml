@@ -46,7 +46,9 @@ jobs:
         with:
           tools: node go jq
       - name: Test CI failure and evidence contracts
-        run: python3 -m unittest discover -s scripts/ci -p 'test_*.py' -v
+        run: |
+          python3 -m unittest discover -s scripts/ci -p 'test_*.py' -v
+          python3 -m unittest discover -s ../scripts/gitops -p 'test_*.py' -v
       - name: Select and verify affected projects
         id: plan
         env:

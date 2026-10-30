@@ -53,7 +53,7 @@ def validate_e2e(evidence, metadata, mode, native):
     counts["passed_test_names"] = sorted(counts["passed_test_names"])
     require(recorded == counts, "Cypress evidence disagrees with native XML: " + mode)
     identities = evidence.get("identity_checks", [])
-    require(len(identities) >= 2, "Missing before/after restart identity checks")
+    require(len(identities) >= 3, "Missing before/after Orders and Cart restart identity checks")
     for snapshot in identities:
         require(set(snapshot) == set(SERVICES), "E2E identity evidence is missing a service")
         for service in SERVICES:
@@ -64,6 +64,10 @@ def validate_e2e(evidence, metadata, mode, native):
     require(type(before) is int and before > 0
             and persistence.get("database_rows", 0) >= before
             and persistence.get("orders_after_restart", 0) >= before, "Missing order persistence proof")
+    cart = evidence.get("cart_persistence", {})
+    require(cart.get("items_before_restart") == 1 and cart.get("items_after_restart") == 1
+            and cart.get("database_quantity") == 3 and cart.get("quantity_after_restart") == 3
+            and cart.get("unit_price_after_restart") == 123, "Missing MySQL cart persistence proof")
 
 
 def validate_scan(summary, metadata, directory):

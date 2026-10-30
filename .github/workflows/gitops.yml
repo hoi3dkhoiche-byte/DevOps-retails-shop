@@ -1,0 +1,59 @@
+name: Retail GitOps
+
+on:
+  workflow_run:
+    workflows: [Retail CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      expected_dev_commit:
+        description: Full source commit SHA accepted in dev and to promote to production
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  dev-pr:
+    if: >-
+      vars.GITOPS_ENABLED == 'true' &&
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    concurrency:
+      group: retail-gitops-dev
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Validate complete CI attempt and propose dev digests
+        env:
+          SOURCE_TOKEN: ${{ github.token }}
+          GITOPS_TOKEN: ${{ secrets.GITOPS_TOKEN }}
+        run: python3 scripts/gitops/release.py dev
+
+  prod-pr:
+    if: vars.GITOPS_ENABLED == 'true' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    concurrency:
+      group: retail-gitops-prod
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Propose the exact image set accepted in dev
+        env:
+          GITOPS_TOKEN: ${{ secrets.GITOPS_TOKEN }}
+          EXPECTED_DEV_COMMIT: ${{ inputs.expected_dev_commit }}
+        run: python3 scripts/gitops/release.py prod --expected-dev-commit "$EXPECTED_DEV_COMMIT"

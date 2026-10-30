@@ -2,15 +2,26 @@ package com.amazon.sample.orders.config.messaging;
 
 import java.util.Properties;
 import org.springframework.boot.context.event.ApplicationEnvironmentPreparedEvent;
-import org.springframework.context.ApplicationListener;
+import org.springframework.context.ApplicationEvent;
+import org.springframework.context.event.GenericApplicationListener;
+import org.springframework.core.ResolvableType;
 import org.springframework.core.env.PropertiesPropertySource;
 
-public class ApplicationEnvironmentPreparedListener
-  implements ApplicationListener<ApplicationEnvironmentPreparedEvent> {
+public class RabbitMQEnvironmentListener implements GenericApplicationListener {
 
   @Override
-  public void onApplicationEvent(ApplicationEnvironmentPreparedEvent event) {
-    var environment = event.getEnvironment();
+  public boolean supportsEventType(ResolvableType eventType) {
+    return ApplicationEnvironmentPreparedEvent.class.isAssignableFrom(
+      eventType.toClass()
+    );
+  }
+
+  @Override
+  public void onApplicationEvent(ApplicationEvent event) {
+    if (!(event instanceof ApplicationEnvironmentPreparedEvent prepared)) {
+      return;
+    }
+    var environment = prepared.getEnvironment();
 
     var messagingProvider = environment.getProperty(
       "retail.orders.messaging.provider"

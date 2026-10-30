@@ -4,10 +4,10 @@ kind: ConfigMap
 metadata:
   name: {{ include "catalog.configMapName" . }}
 data:
-  RETAIL_CATALOG_PERSISTENCE_PROVIDER: {{ .Values.app.persistence.provider }}
+  RETAIL_CATALOG_PERSISTENCE_PROVIDER: {{ .Values.app.persistence.provider | quote }}
   {{- if (eq "mysql" .Values.app.persistence.provider) }}
-  RETAIL_CATALOG_PERSISTENCE_ENDPOINT: {{ include "catalog.mysql.endpoint" . }}
-  RETAIL_CATALOG_PERSISTENCE_DB_NAME: {{ .Values.app.persistence.database }}
+  RETAIL_CATALOG_PERSISTENCE_ENDPOINT: {{ include "catalog.mysql.endpoint" . | quote }}
+  RETAIL_CATALOG_PERSISTENCE_DB_NAME: {{ .Values.app.persistence.database | quote }}
   {{- end }}
   RETAIL_CATALOG_SEARCH_ENABLED: "{{ .Values.app.search.enabled }}"
   {{- if .Values.app.search.enabled }}

@@ -25,7 +25,7 @@ envFromSecrets: []
 secretRevision: initial
 service:
   type: ClusterIP
-  port: 80
+  port: 8080
 rollout:
   enabled: true
   autoPromotionEnabled: true
@@ -39,10 +39,10 @@ autoscaling:
   targetCPUUtilizationPercentage: 70
 app:
   endpoints:
-    catalog: http://catalog
-    carts: http://carts
-    checkout: http://checkout
-    orders: http://orders
+    catalog: http://catalog:8080
+    carts: http://carts:8080
+    checkout: http://checkout:8080
+    orders: http://orders:8080
   search:
     enabled: true
   chat:

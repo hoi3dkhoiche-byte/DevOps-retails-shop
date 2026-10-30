@@ -2,7 +2,7 @@ variable "admin_cidrs" {
   description = "Actual public IPv4 /32 addresses allowed to administer EKS and access the lab UI."
   type        = list(string)
   validation {
-    condition     = length(var.admin_cidrs) > 0 && alltrue([for cidr in var.admin_cidrs : can(cidrhost(cidr, 0)) && endswith(cidr, "/32")])
+    condition     = length(var.admin_cidrs) > 0 && alltrue([for cidr in var.admin_cidrs : can(cidrnetmask(cidr)) && endswith(cidr, "/32")])
     error_message = "Supply at least one real administration IPv4 /32; public 0.0.0.0/0 is not allowed."
   }
 }

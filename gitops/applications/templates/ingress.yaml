@@ -31,5 +31,5 @@ spec:
             backend:
               service:
                 name: ui-active
-                port: {number: 80}
+                port: {number: 8080}
 {{- end }}

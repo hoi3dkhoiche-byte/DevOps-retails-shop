@@ -67,6 +67,7 @@
     "typescript-eslint": "^8.35.1"
   },
   "resolutions": {
+    "systeminformation": "5.33.16",
     "@grpc/grpc-js": "1.14.5",
     "body-parser": "2.4.0",
     "multer": "2.5.0",

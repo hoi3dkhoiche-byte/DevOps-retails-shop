@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: retail-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  retail.json: |
+    {{- .Files.Get "files/retail.json" | nindent 4 }}

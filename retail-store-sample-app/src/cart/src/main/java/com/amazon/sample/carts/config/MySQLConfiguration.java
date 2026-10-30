@@ -14,8 +14,14 @@ import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 @Configuration
-@ConditionalOnProperty(prefix = "retail.cart.persistence", name = "provider", havingValue = "mysql")
+@ConditionalOnProperty(
+  prefix = "retail.cart.persistence",
+  name = "provider",
+  havingValue = "mysql"
+)
 public class MySQLConfiguration {
+
+  private static final long CONNECTION_TIMEOUT_MS = 10000L;
 
   @Bean(destroyMethod = "close")
   HikariDataSource cartDataSource(
@@ -23,7 +29,9 @@ public class MySQLConfiguration {
     @Value("${retail.cart.persistence.database}") String database,
     @Value("${retail.cart.persistence.username}") String username,
     @Value("${retail.cart.persistence.password}") String password,
-    @Value("${retail.cart.persistence.ssl-mode:VERIFY_IDENTITY}") String sslMode,
+    @Value(
+      "${retail.cart.persistence.ssl-mode:VERIFY_IDENTITY}"
+    ) String sslMode,
     @Value("${retail.cart.persistence.maximum-pool-size:10}") int poolSize,
     @Value("${retail.cart.persistence.trust-store-url:}") String trustStore
   ) {
@@ -35,16 +43,23 @@ public class MySQLConfiguration {
     if (!trustStore.isBlank()) {
       config.addDataSourceProperty("trustCertificateKeyStoreUrl", trustStore);
       config.addDataSourceProperty("trustCertificateKeyStoreType", "PKCS12");
-      config.addDataSourceProperty("trustCertificateKeyStorePassword", "changeit");
+      config.addDataSourceProperty(
+        "trustCertificateKeyStorePassword",
+        "changeit"
+      );
     }
     config.setMaximumPoolSize(poolSize);
-    config.setConnectionTimeout(10000);
+    config.setConnectionTimeout(CONNECTION_TIMEOUT_MS);
     return new HikariDataSource(config);
   }
 
   @Bean
   MySQLCartService mysqlCartService(DataSource cartDataSource) {
-    Flyway.configure().dataSource(cartDataSource).locations("classpath:db/mysql").load().migrate();
+    Flyway.configure()
+      .dataSource(cartDataSource)
+      .locations("classpath:db/mysql")
+      .load()
+      .migrate();
     return new MySQLCartService(
       new JdbcTemplate(cartDataSource),
       new TransactionTemplate(new DataSourceTransactionManager(cartDataSource))

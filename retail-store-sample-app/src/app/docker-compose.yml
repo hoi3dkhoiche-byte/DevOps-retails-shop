@@ -1,273 +1,210 @@
-{
-  "services": {
-    "catalog": {
-      "build": {
-        "context": "../catalog"
-      },
-      "environment": {
-        "GIN_MODE": "release",
-        "RETAIL_CATALOG_PERSISTENCE_PROVIDER": "mysql",
-        "RETAIL_CATALOG_PERSISTENCE_ENDPOINT": "mysql:3306",
-        "RETAIL_CATALOG_PERSISTENCE_DB_NAME": "catalog_ci",
-        "RETAIL_CATALOG_PERSISTENCE_USER": "catalog_user",
-        "RETAIL_CATALOG_PERSISTENCE_PASSWORD": "ci-only-password",
-        "RETAIL_CATALOG_SEARCH_ENABLED": "${SEARCH_ENABLED:-false}",
-        "RETAIL_CATALOG_SEARCH_OS_ENDPOINT": "http://opensearch:9200",
-        "RETAIL_CATALOG_SEARCH_OS_INDEX": "products-ci"
-      },
-      "cap_drop": [
-        "ALL"
-      ],
-      "security_opt": [
-        "no-new-privileges:true"
-      ],
-      "tmpfs": [
-        "/tmp"
-      ],
-      "healthcheck": {
-        "test": [
-          "CMD-SHELL",
-          "curl -fsS http://localhost:8080/health || exit 1"
-        ],
-        "interval": "10s",
-        "timeout": "5s",
-        "retries": 30,
-        "start_period": "30s"
-      },
-      "depends_on": {
-        "mysql": {
-          "condition": "service_healthy"
-        },
-        "opensearch": {
-          "condition": "service_healthy"
-        }
-      }
-    },
-    "cart": {
-      "build": {
-        "context": "../cart"
-      },
-      "environment": {
-        "RETAIL_CART_PERSISTENCE_PROVIDER": "mysql",
-        "RETAIL_CART_PERSISTENCE_ENDPOINT": "mysql:3306",
-        "RETAIL_CART_PERSISTENCE_DATABASE": "cart_ci",
-        "RETAIL_CART_PERSISTENCE_USERNAME": "cart_user",
-        "RETAIL_CART_PERSISTENCE_PASSWORD": "ci-only-password",
-        "RETAIL_CART_PERSISTENCE_SSL_MODE": "DISABLED"
-      },
-      "cap_drop": [
-        "ALL"
-      ],
-      "security_opt": [
-        "no-new-privileges:true"
-      ],
-      "tmpfs": [
-        "/tmp"
-      ],
-      "healthcheck": {
-        "test": [
-          "CMD-SHELL",
-          "curl -fsS http://localhost:8080/actuator/health/readiness || exit 1"
-        ],
-        "interval": "10s",
-        "timeout": "5s",
-        "retries": 30,
-        "start_period": "30s"
-      },
-      "depends_on": {
-        "mysql": {
-          "condition": "service_healthy"
-        }
-      }
-    },
-    "orders": {
-      "build": {
-        "context": "../orders"
-      },
-      "environment": {
-        "RETAIL_ORDERS_PERSISTENCE_PROVIDER": "mysql",
-        "RETAIL_ORDERS_PERSISTENCE_ENDPOINT": "mysql:3306",
-        "RETAIL_ORDERS_PERSISTENCE_NAME": "orders_ci",
-        "RETAIL_ORDERS_PERSISTENCE_USERNAME": "orders_user",
-        "RETAIL_ORDERS_PERSISTENCE_PASSWORD": "ci-only-password",
-        "RETAIL_ORDERS_PERSISTENCE_SSL_MODE": "DISABLED",
-        "RETAIL_ORDERS_MESSAGING_PROVIDER": "rabbitmq",
-        "RETAIL_ORDERS_MESSAGING_RABBITMQ_ADDRESSES": "rabbitmq:5672",
-        "RETAIL_ORDERS_MESSAGING_RABBITMQ_USERNAME": "rabbitmq",
-        "RETAIL_ORDERS_MESSAGING_RABBITMQ_PASSWORD": "ci-only-password"
-      },
-      "cap_drop": [
-        "ALL"
-      ],
-      "security_opt": [
-        "no-new-privileges:true"
-      ],
-      "tmpfs": [
-        "/tmp"
-      ],
-      "healthcheck": {
-        "test": [
-          "CMD-SHELL",
-          "curl -fsS http://localhost:8080/actuator/health/readiness || exit 1"
-        ],
-        "interval": "10s",
-        "timeout": "5s",
-        "retries": 30,
-        "start_period": "30s"
-      },
-      "depends_on": {
-        "mysql": {
-          "condition": "service_healthy"
-        },
-        "rabbitmq": {
-          "condition": "service_healthy"
-        }
-      }
-    },
-    "checkout": {
-      "build": {
-        "context": "../checkout"
-      },
-      "environment": {
-        "RETAIL_CHECKOUT_PERSISTENCE_PROVIDER": "redis",
-        "RETAIL_CHECKOUT_PERSISTENCE_REDIS_URL": "redis://checkout-redis:6379",
-        "RETAIL_CHECKOUT_PERSISTENCE_REDIS_KEY_PREFIX": "retail:ci:",
-        "RETAIL_CHECKOUT_ENDPOINTS_ORDERS": "http://orders:8080"
-      },
-      "cap_drop": [
-        "ALL"
-      ],
-      "security_opt": [
-        "no-new-privileges:true"
-      ],
-      "tmpfs": [
-        "/tmp"
-      ],
-      "healthcheck": {
-        "test": [
-          "CMD-SHELL",
-          "curl -fsS http://localhost:8080/health || exit 1"
-        ],
-        "interval": "10s",
-        "timeout": "5s",
-        "retries": 30,
-        "start_period": "30s"
-      },
-      "depends_on": {
-        "checkout-redis": {
-          "condition": "service_healthy"
-        }
-      }
-    },
-    "ui": {
-      "build": {
-        "context": "../ui"
-      },
-      "environment": {
-        "RETAIL_UI_ENDPOINTS_CATALOG": "http://catalog:8080",
-        "RETAIL_UI_ENDPOINTS_CARTS": "http://cart:8080",
-        "RETAIL_UI_ENDPOINTS_ORDERS": "http://orders:8080",
-        "RETAIL_UI_ENDPOINTS_CHECKOUT": "http://checkout:8080",
-        "RETAIL_UI_SEARCH_ENABLED": "${SEARCH_ENABLED:-false}"
-      },
-      "cap_drop": [
-        "ALL"
-      ],
-      "security_opt": [
-        "no-new-privileges:true"
-      ],
-      "tmpfs": [
-        "/tmp"
-      ],
-      "healthcheck": {
-        "test": [
-          "CMD-SHELL",
-          "curl -fsS http://localhost:8080/actuator/health/readiness || exit 1"
-        ],
-        "interval": "10s",
-        "timeout": "5s",
-        "retries": 30,
-        "start_period": "30s"
-      },
-      "ports": [
-        "127.0.0.1:8888:8080"
-      ]
-    },
-    "mysql": {
-      "image": "mysql:8.4.11",
-      "environment": {
-        "MYSQL_ROOT_PASSWORD": "ci-only-root-password"
-      },
-      "volumes": [
-        "mysql-data:/var/lib/mysql",
-        "./mysql-init.sh:/docker-entrypoint-initdb.d/10-retail.sh:ro"
-      ],
-      "healthcheck": {
-        "test": [
-          "CMD-SHELL",
-          "MYSQL_PWD=$$MYSQL_ROOT_PASSWORD mysql -h127.0.0.1 -uroot -e \"SELECT 1\""
-        ],
-        "interval": "5s",
-        "timeout": "5s",
-        "retries": 40,
-        "start_period": "30s"
-      }
-    },
-    "checkout-redis": {
-      "image": "redis:7.4.2-alpine",
-      "healthcheck": {
-        "test": [
-          "CMD",
-          "redis-cli",
-          "ping"
-        ],
-        "interval": "5s",
-        "timeout": "5s",
-        "retries": 20
-      }
-    },
-    "rabbitmq": {
-      "image": "rabbitmq:4.2.0-management",
-      "environment": {
-        "RABBITMQ_DEFAULT_USER": "rabbitmq",
-        "RABBITMQ_DEFAULT_PASS": "ci-only-password"
-      },
-      "healthcheck": {
-        "test": [
-          "CMD",
-          "rabbitmq-diagnostics",
-          "-q",
-          "ping"
-        ],
-        "interval": "10s",
-        "timeout": "10s",
-        "retries": 30
-      }
-    },
-    "opensearch": {
-      "image": "opensearchproject/opensearch:3.5.0",
-      "environment": {
-        "discovery.type": "single-node",
-        "plugins.security.disabled": "true",
-        "DISABLE_INSTALL_DEMO_CONFIG": "true",
-        "OPENSEARCH_JAVA_OPTS": "-Xms512m -Xmx512m"
-      },
-      "healthcheck": {
-        "test": [
-          "CMD-SHELL",
-          "curl -fsS http://localhost:9200/_cluster/health"
-        ],
-        "interval": "10s",
-        "timeout": "10s",
-        "retries": 30
-      },
-      "volumes": [
-        "opensearch-data:/usr/share/opensearch/data"
-      ]
-    }
-  },
-  "volumes": {
-    "mysql-data": {},
-    "opensearch-data": {}
-  }
-}
+services:
+  catalog:
+    build:
+      context: ../catalog
+    environment:
+      GIN_MODE: release
+      RETAIL_CATALOG_PERSISTENCE_PROVIDER: mysql
+      RETAIL_CATALOG_PERSISTENCE_ENDPOINT: mysql:3306
+      RETAIL_CATALOG_PERSISTENCE_DB_NAME: catalog_ci
+      RETAIL_CATALOG_PERSISTENCE_USER: catalog_user
+      RETAIL_CATALOG_PERSISTENCE_PASSWORD: ci-only-password
+      RETAIL_CATALOG_SEARCH_ENABLED: ${SEARCH_ENABLED:-false}
+      RETAIL_CATALOG_SEARCH_OS_ENDPOINT: http://opensearch:9200
+      RETAIL_CATALOG_SEARCH_OS_INDEX: products-ci
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -fsS http://localhost:8080/health || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    depends_on:
+      mysql:
+        condition: service_healthy
+      opensearch:
+        condition: service_healthy
+  cart:
+    build:
+      context: ../cart
+    environment:
+      RETAIL_CART_PERSISTENCE_PROVIDER: mysql
+      RETAIL_CART_PERSISTENCE_ENDPOINT: mysql:3306
+      RETAIL_CART_PERSISTENCE_DATABASE: cart_ci
+      RETAIL_CART_PERSISTENCE_USERNAME: cart_user
+      RETAIL_CART_PERSISTENCE_PASSWORD: ci-only-password
+      RETAIL_CART_PERSISTENCE_SSL_MODE: REQUIRED
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -fsS http://localhost:8080/actuator/health/readiness || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    depends_on:
+      mysql:
+        condition: service_healthy
+  orders:
+    build:
+      context: ../orders
+    environment:
+      RETAIL_ORDERS_PERSISTENCE_PROVIDER: mysql
+      RETAIL_ORDERS_PERSISTENCE_ENDPOINT: mysql:3306
+      RETAIL_ORDERS_PERSISTENCE_NAME: orders_ci
+      RETAIL_ORDERS_PERSISTENCE_USERNAME: orders_user
+      RETAIL_ORDERS_PERSISTENCE_PASSWORD: ci-only-password
+      RETAIL_ORDERS_PERSISTENCE_SSL_MODE: REQUIRED
+      RETAIL_ORDERS_MESSAGING_PROVIDER: rabbitmq
+      RETAIL_ORDERS_MESSAGING_RABBITMQ_ADDRESSES: rabbitmq:5672
+      RETAIL_ORDERS_MESSAGING_RABBITMQ_USERNAME: rabbitmq
+      RETAIL_ORDERS_MESSAGING_RABBITMQ_PASSWORD: ci-only-password
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -fsS http://localhost:8080/actuator/health/readiness || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+  checkout:
+    build:
+      context: ../checkout
+    environment:
+      RETAIL_CHECKOUT_PERSISTENCE_PROVIDER: redis
+      RETAIL_CHECKOUT_PERSISTENCE_REDIS_URL: redis://checkout-redis:6379
+      RETAIL_CHECKOUT_PERSISTENCE_REDIS_KEY_PREFIX: "retail:ci:"
+      RETAIL_CHECKOUT_ENDPOINTS_ORDERS: http://orders:8080
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -fsS http://localhost:8080/health || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    depends_on:
+      checkout-redis:
+        condition: service_healthy
+  ui:
+    build:
+      context: ../ui
+    environment:
+      RETAIL_UI_ENDPOINTS_CATALOG: http://catalog:8080
+      RETAIL_UI_ENDPOINTS_CARTS: http://cart:8080
+      RETAIL_UI_ENDPOINTS_ORDERS: http://orders:8080
+      RETAIL_UI_ENDPOINTS_CHECKOUT: http://checkout:8080
+      RETAIL_UI_SEARCH_ENABLED: ${SEARCH_ENABLED:-false}
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -fsS http://localhost:8080/actuator/health/readiness || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    ports:
+      - 127.0.0.1:8888:8080
+    depends_on:
+      catalog:
+        condition: service_healthy
+      cart:
+        condition: service_healthy
+      checkout:
+        condition: service_healthy
+      orders:
+        condition: service_healthy
+  mysql:
+    image: mysql:8.4.11
+    environment:
+      MYSQL_ROOT_PASSWORD: ci-only-root-password
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./mysql-init.sh:/docker-entrypoint-initdb.d/10-retail.sh:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - MYSQL_PWD=$$MYSQL_ROOT_PASSWORD mysql -h127.0.0.1 -uroot -e "SELECT 1"
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 30s
+  checkout-redis:
+    image: redis:7.4.2-alpine
+    healthcheck:
+      test:
+        - CMD
+        - redis-cli
+        - ping
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  rabbitmq:
+    image: rabbitmq:4.2.0-management
+    environment:
+      RABBITMQ_DEFAULT_USER: rabbitmq
+      RABBITMQ_DEFAULT_PASS: ci-only-password
+    healthcheck:
+      test:
+        - CMD
+        - rabbitmq-diagnostics
+        - -q
+        - ping
+      interval: 10s
+      timeout: 10s
+      retries: 30
+  opensearch:
+    image: opensearchproject/opensearch:3.5.0
+    environment:
+      discovery.type: single-node
+      plugins.security.disabled: "true"
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      OPENSEARCH_JAVA_OPTS: -Xms512m -Xmx512m
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -fsS http://localhost:9200/_cluster/health
+      interval: 10s
+      timeout: 10s
+      retries: 30
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+volumes:
+  mysql-data: {}
+  opensearch-data: {}

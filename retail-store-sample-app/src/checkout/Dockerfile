@@ -1,8 +1,8 @@
-FROM node:20-alpine AS build
+FROM node:22-alpine@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914 AS build
 WORKDIR /usr/src/app
 COPY --chown=node:node package*.json ./
 COPY --chown=node:node . .
-RUN yarn install --frozen-lockfile
+RUN yarn install --immutable
 RUN yarn build
 # Prune devDependencies so that only what is required at runtime is copied
 # into the final image.
@@ -10,41 +10,19 @@ RUN yarn workspaces focus --all --production
 USER node
 
 
-FROM public.ecr.aws/amazonlinux/amazonlinux:2023
+FROM node:22-alpine@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914
 
-# Apply all available security updates before installing packages. Amazon Linux
-# 2023 locks DNF to the release snapshot the base image was built from, so
-# --releasever=latest is required to pick up newer patched packages.
-# https://docs.aws.amazon.com/linux/al2023/ug/deterministic-upgrades-usage.html
-#
-# We tell DNF not to install Recommends and Suggests packages, which are
-# weak dependencies in DNF terminology, thus keeping our installed set of
-# packages as minimal as possible.
-RUN dnf --releasever=latest upgrade -q -y \
-    && \
-    dnf --setopt=install_weak_deps=False install -q -y \
-    nodejs20 \
-    shadow-utils \
-    && \
-    dnf clean all
-
-RUN alternatives --install /usr/bin/node node /usr/bin/node-20 90
-
-ENV APPUSER=appuser
-ENV APPUID=1000
-ENV APPGID=1000
-
-RUN useradd \
-    --home "/app" \
-    --create-home \
-    --user-group \
-    --uid "$APPUID" \
-    "$APPUSER"
+# Keep build and runtime on the same Node major and libc. Apply Alpine security
+# updates and retain curl for Compose/Kubernetes health checks.
+RUN apk upgrade --no-cache && apk add --no-cache curl \
+    && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /opt/yarn-v* \
+    && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/yarn /usr/local/bin/yarnpkg
+ENV NODE_ENV=production
 
 WORKDIR /app
-USER appuser
+USER node
 
-COPY --chown=appuser:appuser --from=build /usr/src/app/node_modules ./node_modules
-COPY --chown=appuser:appuser --from=build /usr/src/app/dist ./dist
+COPY --chown=node:node --from=build /usr/src/app/node_modules ./node_modules
+COPY --chown=node:node --from=build /usr/src/app/dist ./dist
 
 ENTRYPOINT [ "node", "dist/main.js" ]

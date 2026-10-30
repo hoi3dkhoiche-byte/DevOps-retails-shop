@@ -9469,12 +9469,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"systeminformation@npm:^5.31.1, systeminformation@npm:^5.31.6":
-  version: 5.33.10
-  resolution: "systeminformation@npm:5.33.10"
+"systeminformation@npm:5.33.16":
+  version: 5.33.16
+  resolution: "systeminformation@npm:5.33.16"
   bin:
     systeminformation: lib/cli.js
-  checksum: 10c0/32f2aa1f7f42a8ab101b160ccb7eeb4ec4b031737ee481bdbc5b3a7784437e2b288a826d96aaa66f4f64b18cf59b997942edb67d07487b69c17ac10fe5615116
+  checksum: 10c0/b63a2d7eafed679d7541de3dbcad4b0fd4384774c7c506a2847f62b5eb38ef55f81b55fce9d29a0308e0922c25adbcbc120129009819911aeb0b2985b4ab1335
   conditions: (os=darwin | os=linux | os=win32 | os=freebsd | os=openbsd | os=netbsd | os=sunos | os=android)
   languageName: node
   linkType: hard

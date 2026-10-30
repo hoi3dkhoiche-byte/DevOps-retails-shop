@@ -9,9 +9,15 @@ controller:
   replicas: 1
   extraArgs:
   - --aws-verify-target-group
-  serviceAccount:
-    create: true
-    name: argo-rollouts
-    annotations: {}
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: false
+      additionalLabels:
+        release: kube-prometheus-stack
 dashboard:
   enabled: false
+serviceAccount:
+  create: true
+  name: argo-rollouts
+  annotations: {}

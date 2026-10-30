@@ -35,7 +35,9 @@ public class OrdersEventHandler {
   @Autowired
   private MessagingProvider messagingProvider;
 
-  @TransactionalEventListener(phase = org.springframework.transaction.event.TransactionPhase.BEFORE_COMMIT)
+  @TransactionalEventListener(
+    phase = org.springframework.transaction.event.TransactionPhase.BEFORE_COMMIT
+  )
   public void onOrderCreated(OrderCreatedEvent event) {
     this.messagingProvider.publishEvent(event);
   }

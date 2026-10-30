@@ -9,14 +9,18 @@ resource "aws_iam_openid_connect_provider" "eks" {
 locals {
   oidc_host = replace(aws_eks_cluster.retail.identity[0].oidc[0].issuer, "https://", "")
   service_accounts = {
-    ebs-csi    = "kube-system:ebs-csi-controller-sa"
-    lb         = "kube-system:aws-load-balancer-controller"
-    autoscaler = "kube-system:cluster-autoscaler"
-    rollouts   = "argo-rollouts:argo-rollouts"
-    eso-dev    = "retail-dev:external-secrets-reader"
-    eso-prod   = "retail-prod:external-secrets-reader"
-    loki       = "monitoring:loki"
-    velero     = "velero:velero"
+    ebs-csi        = "kube-system:ebs-csi-controller-sa"
+    lb             = "kube-system:aws-load-balancer-controller"
+    autoscaler     = "kube-system:cluster-autoscaler"
+    rollouts       = "argo-rollouts:argo-rollouts"
+    eso-dev        = "retail-dev:external-secrets-reader"
+    eso-prod       = "retail-prod:external-secrets-reader"
+    eso-monitoring = "monitoring:external-secrets-reader"
+    eso-argocd     = "argocd:external-secrets-reader"
+    grafana        = "monitoring:grafana"
+    loki           = "monitoring:loki"
+    velero         = "velero:velero"
+    bootstrap      = "retail-ops:backend-bootstrap"
   }
 }
 resource "aws_iam_role" "workload" {
@@ -82,7 +86,8 @@ resource "aws_iam_role_policy" "lb" {
 }
 
 resource "aws_iam_role" "terraform" {
-  name = "retail-lab-terraform"
+  name                 = "retail-lab-terraform"
+  max_session_duration = 7200
   assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{
     Effect    = "Allow", Principal = { Federated = var.github_oidc_provider_arn }, Action = "sts:AssumeRoleWithWebIdentity"
     Condition = { StringEquals = { "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com", "token.actions.githubusercontent.com:sub" = "repo:hoi3dkhoiche-byte/DevOps-retails-shop:ref:refs/heads/main" } }

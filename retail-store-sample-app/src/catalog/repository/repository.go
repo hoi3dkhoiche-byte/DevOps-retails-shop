@@ -2,11 +2,11 @@ package repository
 
 import (
 	"context"
-"crypto/tls"
-"crypto/x509"
-"os"
-mysqldriver "github.com/go-sql-driver/mysql"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
+	mysqldriver "github.com/go-sql-driver/mysql"
+	"os"
 	"time"
 
 	"github.com/aws-containers/retail-store-sample-app/catalog/config"
@@ -29,13 +29,19 @@ type CatalogRepository interface {
 }
 
 func createMySQLDatabase(config config.DatabaseConfiguration) (*gorm.DB, error) {
-    if config.TLS == "rds" {
-        certs, err := os.ReadFile(config.CAFile)
-        if err != nil { return nil, fmt.Errorf("read RDS CA: %w", err) }
-        roots := x509.NewCertPool()
-        if !roots.AppendCertsFromPEM(certs) { return nil, fmt.Errorf("RDS CA file contains no certificates") }
-        if err := mysqldriver.RegisterTLSConfig("rds", &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}); err != nil { return nil, err }
-    }
+	if config.TLS == "rds" {
+		certs, err := os.ReadFile(config.CAFile)
+		if err != nil {
+			return nil, fmt.Errorf("read RDS CA: %w", err)
+		}
+		roots := x509.NewCertPool()
+		if !roots.AppendCertsFromPEM(certs) {
+			return nil, fmt.Errorf("RDS CA file contains no certificates")
+		}
+		if err := mysqldriver.RegisterTLSConfig("rds", &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}); err != nil {
+			return nil, err
+		}
+	}
 
 	connectionString := fmt.Sprintf("%s:%s@tcp(%s)/%s?timeout=%ds&charset=utf8mb4&parseTime=True&loc=UTC&tls=%s", config.User, config.Password, config.Endpoint, config.Name, config.ConnectTimeout, config.TLS)
 

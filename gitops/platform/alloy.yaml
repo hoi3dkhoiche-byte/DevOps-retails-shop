@@ -4,7 +4,40 @@ controller:
   - operator: Exists
 alloy:
   configMap:
-    content: "discovery.kubernetes \"pods\" {\n  role = \"pod\"\n}\nloki.source.kubernetes\
-      \ \"pods\" {\n  targets = discovery.kubernetes.pods.targets\n  forward_to =\
-      \ [loki.write.default.receiver]\n}\nloki.write \"default\" {\n  endpoint { url\
-      \ = \"http://loki.monitoring.svc:3100/loki/api/v1/push\" }\n}\n"
+    content: |
+      discovery.kubernetes "pods" {
+        role = "pod"
+        selectors {
+          role = "pod"
+          field = "spec.nodeName=" + sys.env("NODE_NAME")
+        }
+      }
+      discovery.relabel "pods" {
+        targets = discovery.kubernetes.pods.targets
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          target_label = "namespace"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          target_label = "pod"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_container_name"]
+          target_label = "container"
+        }
+      }
+      loki.source.kubernetes "pods" {
+        targets = discovery.relabel.pods.output
+        forward_to = [loki.write.default.receiver]
+      }
+      loki.write "default" {
+        endpoint {
+          url = "http://loki.monitoring.svc:3100/loki/api/v1/push"
+        }
+      }
+  extraEnv:
+  - name: NODE_NAME
+    valueFrom:
+      fieldRef:
+        fieldPath: spec.nodeName

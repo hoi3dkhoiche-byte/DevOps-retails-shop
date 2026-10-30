@@ -25,7 +25,7 @@ type AppConfiguration struct {
 
 // DatabaseConfiguration exported
 type DatabaseConfiguration struct {
-	CAFile string `env:"RETAIL_CATALOG_PERSISTENCE_CA_FILE"`
+	CAFile         string `env:"RETAIL_CATALOG_PERSISTENCE_CA_FILE"`
 	Type           string `env:"RETAIL_CATALOG_PERSISTENCE_PROVIDER,default=in-memory"`
 	Endpoint       string `env:"RETAIL_CATALOG_PERSISTENCE_ENDPOINT"`
 	Name           string `env:"RETAIL_CATALOG_PERSISTENCE_DB_NAME,default=catalogdb"`

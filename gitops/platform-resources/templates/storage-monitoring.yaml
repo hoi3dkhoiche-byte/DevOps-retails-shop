@@ -1,14 +1,3 @@
-apiVersion: storage.k8s.io/v1
-kind: StorageClass
-metadata:
-  name: gp3-retain
-provisioner: ebs.csi.aws.com
-parameters:
-  type: gp3
-  encrypted: "true"
-reclaimPolicy: Retain
-volumeBindingMode: WaitForFirstConsumer
-allowVolumeExpansion: true
 {{- range $environment := list "dev" "prod" }}
 {{- range $service := list "ui" "catalog" "carts" "checkout" "orders" }}
 ---
@@ -59,7 +48,48 @@ spec:
           for: 5m
           labels: {severity: critical}
           annotations: {summary: "Retail HTTP 5xx responses are increasing"}
+        - alert: RetailRolloutDegraded
+          expr: rollout_info{namespace=~"retail-.*",phase="Degraded"} == 1
+          for: 2m
+          labels: {severity: critical}
+          annotations: {summary: "Retail UI rollout is degraded"}
         - alert: RetailBackupFailed
           expr: increase(velero_backup_failure_total[24h]) > 0
           labels: {severity: critical}
           annotations: {summary: "Velero backup failed"}
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: argo-rollouts
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames: [argo-rollouts]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: argo-rollouts
+      app.kubernetes.io/component: rollouts-controller
+  endpoints:
+    - port: metrics
+      honorLabels: true
+      path: /metrics
+      interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: velero
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames: [velero]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: velero
+      app.kubernetes.io/instance: velero
+  endpoints:
+    - port: http-monitoring
+      path: /metrics
+      interval: 30s

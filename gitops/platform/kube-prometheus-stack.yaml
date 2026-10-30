@@ -1,8 +1,8 @@
 prometheus:
   prometheusSpec:
-    nodeSelector: &id001
+    nodeSelector:
       workload: management
-    tolerations: &id002
+    tolerations:
     - key: workload
       operator: Equal
       value: management
@@ -31,8 +31,13 @@ prometheus:
     podMonitorSelectorNilUsesHelmValues: false
     serviceMonitorSelectorNilUsesHelmValues: false
 grafana:
-  nodeSelector: *id001
-  tolerations: *id002
+  nodeSelector:
+    workload: management
+  tolerations:
+  - key: workload
+    operator: Equal
+    value: management
+    effect: NoSchedule
   service:
     type: ClusterIP
   persistence:
@@ -48,10 +53,31 @@ grafana:
     type: loki
     url: http://loki:3100
     access: proxy
+    uid: loki
+  - name: CloudWatch
+    type: cloudwatch
+    jsonData:
+      authType: default
+      defaultRegion: ap-southeast-1
+    uid: cloudwatch
+  serviceAccount:
+    create: true
+    name: grafana
+    annotations: {}
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      searchNamespace: monitoring
 alertmanager:
   alertmanagerSpec:
-    nodeSelector: *id001
-    tolerations: *id002
+    nodeSelector:
+      workload: management
+    tolerations:
+    - key: workload
+      operator: Equal
+      value: management
+      effect: NoSchedule
     replicas: 1
     storage:
       volumeClaimTemplate:
@@ -63,13 +89,39 @@ alertmanager:
             requests:
               storage: 2Gi
 prometheusOperator:
-  nodeSelector: *id001
-  tolerations: *id002
+  nodeSelector:
+    workload: management
+  tolerations:
+  - key: workload
+    operator: Equal
+    value: management
+    effect: NoSchedule
   admissionWebhooks:
-    patch: &id003
-      nodeSelector: *id001
-      tolerations: *id002
-kube-state-metrics: *id003
+    patch:
+      nodeSelector:
+        workload: management
+      tolerations:
+      - key: workload
+        operator: Equal
+        value: management
+        effect: NoSchedule
+kube-state-metrics:
+  nodeSelector:
+    workload: management
+  tolerations:
+  - key: workload
+    operator: Equal
+    value: management
+    effect: NoSchedule
 prometheus-node-exporter:
   tolerations:
   - operator: Exists
+crds:
+  upgradeJob:
+    nodeSelector:
+      workload: management
+    tolerations:
+    - key: workload
+      operator: Equal
+      value: management
+      effect: NoSchedule

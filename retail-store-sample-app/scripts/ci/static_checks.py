@@ -45,7 +45,7 @@ def main():
         wrapper = APP / "src" / service / "mvnw"
         if not os.access(wrapper, os.X_OK):
             raise ValueError("mvnw must be executable in a clean Linux checkout")
-    run(["actionlint", "-shellcheck=", "../.github/workflows/ci.yml"])
+    run(["actionlint", "-shellcheck=", *[str(path) for path in sorted((APP.parent / ".github/workflows").glob("*.yml"))]])
     if plan["event"] == "pull_request" and plan.get("base"):
         names = run(["git", "diff", "--relative", "--name-only", "--diff-filter=d",
                      plan["base"], plan["sha"], "--", "."]).splitlines()

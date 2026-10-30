@@ -18,7 +18,7 @@
 
 package com.amazon.sample.orders;
 
-import com.amazon.sample.orders.config.messaging.ApplicationEnvironmentPreparedListener;
+import com.amazon.sample.orders.config.messaging.RabbitMQEnvironmentListener;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
@@ -29,7 +29,7 @@ public class OrdersApplication {
   public static void main(String[] args) {
     SpringApplication app = new SpringApplication(OrdersApplication.class);
 
-    app.addListeners(new ApplicationEnvironmentPreparedListener());
+    app.addListeners(new RabbitMQEnvironmentListener());
     app.run(args);
   }
 }

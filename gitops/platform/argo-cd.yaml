@@ -16,8 +16,26 @@ redis-ha:
   enabled: false
 configs:
   cm:
-    resource.customizations.health.argoproj.io_Application: "hs = {}\nhs.status =\
-      \ \"Progressing\"\nif obj.status ~= nil and obj.status.health ~= nil then\n\
-      \  hs.status = obj.status.health.status\nend\nreturn hs\n"
+    resource.customizations.health.argoproj.io_Application: |
+      hs = {status = "Progressing", message = "Waiting for child Application to sync"}
+      if obj.status ~= nil and obj.status.sync ~= nil and obj.status.sync.status == "Synced" and obj.status.health ~= nil then
+        hs.status = obj.status.health.status
+        hs.message = obj.status.health.message
+      end
+      return hs
+    resource.customizations.health.external-secrets.io_ExternalSecret: |
+      hs = {status = "Progressing", message = "Waiting for Secrets Manager synchronization"}
+      if obj.status ~= nil and obj.status.conditions ~= nil then
+        for _, condition in ipairs(obj.status.conditions) do
+          if condition.type == "Ready" and condition.status == "True" then hs.status = "Healthy" end
+        end
+      end
+      return hs
   params:
     server.insecure: false
+  secret:
+    createSecret: false
+redisSecretInit:
+  enabled: false
+redis:
+  existingSecret: argocd-redis

@@ -21,3 +21,5 @@ dataCidrs:
 - 10.0.100.0/24
 - 10.0.110.0/24
 - 10.0.120.0/24
+alerting:
+  enabled: false
