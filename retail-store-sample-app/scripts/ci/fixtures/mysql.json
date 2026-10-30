@@ -9,7 +9,7 @@
         "name": "ci-mysql-init"
       },
       "data": {
-        "10-retail.sh": "#!/bin/sh\nset -eu\n# Disposable local/CI fixture only. AWS credentials are bootstrapped out of band.\nfor service in catalog cart orders; do\n  MYSQL_PWD=\"$MYSQL_ROOT_PASSWORD\" mysql -uroot <<SQL\nCREATE DATABASE IF NOT EXISTS ${service}_ci;\nCREATE USER IF NOT EXISTS '${service}_user'@'%' IDENTIFIED BY 'ci-only-password';\nGRANT ALL PRIVILEGES ON ${service}_ci.* TO '${service}_user'@'%';\nSQL\ndone\n"
+        "10-retail.sh": "#!/bin/sh\n# MySQL sources non-executable init files on Linux. Keep shell options local so\n# nounset cannot break the parent entrypoint after this script has returned.\n(\nset -eu\n# Disposable local/CI fixture only. AWS credentials are bootstrapped out of band.\nfor service in catalog cart orders; do\n  MYSQL_PWD=\"$MYSQL_ROOT_PASSWORD\" mysql -uroot <<SQL\nCREATE DATABASE IF NOT EXISTS ${service}_ci;\nCREATE USER IF NOT EXISTS '${service}_user'@'%' IDENTIFIED BY 'ci-only-password';\nGRANT ALL PRIVILEGES ON ${service}_ci.* TO '${service}_user'@'%';\nSQL\ndone\n)\n"
       }
     },
     {
@@ -89,7 +89,7 @@
                     "command": [
                       "sh",
                       "-c",
-                      "MYSQL_PWD=$MYSQL_ROOT_PASSWORD mysql -h127.0.0.1 -uroot -e \"SELECT 1\""
+                      "export MYSQL_PWD=ci-only-password; for service in catalog cart orders; do mysql -h127.0.0.1 -u${service}_user ${service}_ci -e \"SELECT 1\" || exit 1; done"
                     ]
                   },
                   "periodSeconds": 5,

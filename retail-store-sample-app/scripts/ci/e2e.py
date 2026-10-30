@@ -110,8 +110,10 @@ class E2E:
         if not binary:
             with (self.report / "commands.log").open("a", encoding="utf-8") as log:
                 log.write("+ " + " ".join(args) + "\n" + stdout + stderr)
-        require(process.returncode == 0, "Command failed: " + " ".join(args) + "\n"
-                + (stderr.decode(errors="replace") if binary else stderr))
+        # Cypress prints assertion failures to stdout. Preserve them in the job
+        # error as well as the complete commands.log artifact.
+        failure_output = stderr.decode(errors="replace") if binary else (stdout + stderr)[-16000:]
+        require(process.returncode == 0, "Command failed: " + " ".join(args) + "\n" + failure_output)
         return stdout
 
     def diagnostic(self, name, args):
@@ -206,7 +208,8 @@ class E2E:
                 values["rabbitmq"] = {"create": True, "image": {"tag": "4.2.0-management"}}
         elif service == "checkout":
             values.update({"app": {"persistence": {"provider": "redis"}, "endpoints": {"orders": "http://orders:80"}},
-                           "redis": {"create": True}, "extraEnv": [{"name": "RETAIL_CHECKOUT_PERSISTENCE_REDIS_KEY_PREFIX", "value": "retail:ci:"}]})
+                           "redis": {"create": True, "image": {"tag": "7.4.2-alpine"}},
+                           "extraEnv": [{"name": "RETAIL_CHECKOUT_PERSISTENCE_REDIS_KEY_PREFIX", "value": "retail:ci:"}]})
         else:
             values["app"] = {"endpoints": {"catalog": "http://catalog:80", "carts": "http://carts:80",
                                           "checkout": "http://checkout:80", "orders": "http://orders:80"},
@@ -384,6 +387,8 @@ class E2E:
             self.diagnostic("pods.json", self.kubectl("get", "pods", "-o", "json"))
             self.diagnostic("events.txt", self.kubectl("get", "events", "--sort-by=.lastTimestamp"))
             self.diagnostic("describe.txt", self.kubectl("describe", "pods"))
+            self.diagnostic("mysql.log", self.kubectl("logs", "statefulset/mysql", "--tail=300"))
+            self.diagnostic("mysql.previous.log", self.kubectl("logs", "statefulset/mysql", "--previous", "--tail=300"))
             for service in SERVICES:
                 self.diagnostic(service + ".log", self.kubectl("logs", "deployment/" + RELEASE[service], "--all-containers=true", "--tail=300"))
         else:

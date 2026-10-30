@@ -160,7 +160,10 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - MYSQL_PWD=$$MYSQL_ROOT_PASSWORD mysql -h127.0.0.1 -uroot -e "SELECT 1"
+        - >-
+          for service in catalog cart orders; do
+            MYSQL_PWD=ci-only-password mysql -h127.0.0.1 -u$${service}_user $${service}_ci -e "SELECT 1" || exit 1;
+          done
       interval: 5s
       timeout: 5s
       retries: 40
