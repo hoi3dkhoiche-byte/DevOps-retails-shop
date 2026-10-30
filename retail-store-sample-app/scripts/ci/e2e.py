@@ -13,7 +13,7 @@ import time
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
-from images import inspect_image
+from images import archive_config_id, inspect_image, sha256_file
 
 APP = Path(__file__).resolve().parents[2]
 SERVICES = ("ui", "catalog", "cart", "checkout", "orders")
@@ -21,6 +21,11 @@ RELEASE = {"ui": "ui", "catalog": "catalog", "cart": "carts", "checkout": "check
 PORTS = {"ui": 8888, "catalog": 8081, "cart": 8082, "checkout": 8085, "orders": 8083}
 HEALTH = {"ui": "/actuator/health", "catalog": "/health", "cart": "/actuator/health",
           "checkout": "/health", "orders": "/actuator/health"}
+KIND_FIXTURES = {
+    "mysql": {"repository": "docker.io/library/mysql", "tag": "8.4.11"},
+    "rabbitmq": {"repository": "docker.io/library/rabbitmq", "tag": "4.2.0-management"},
+    "redis": {"repository": "docker.io/library/redis", "tag": "7.4.2-alpine"},
+}
 
 
 def require(condition, message):
@@ -205,10 +210,10 @@ class E2E:
             if service == "orders":
                 values["app"]["messaging"] = {"provider": "rabbitmq", "rabbitmq": {
                     "secret": {"name": "orders-rabbitmq", "username": "rabbitmq", "password": "ci-only-password"}}}
-                values["rabbitmq"] = {"create": True, "image": {"tag": "4.2.0-management"}}
+                values["rabbitmq"] = {"create": True, "image": dict(KIND_FIXTURES["rabbitmq"], pullPolicy="Never")}
         elif service == "checkout":
             values.update({"app": {"persistence": {"provider": "redis"}, "endpoints": {"orders": "http://orders:80"}},
-                           "redis": {"create": True, "image": {"tag": "7.4.2-alpine"}},
+                           "redis": {"create": True, "image": dict(KIND_FIXTURES["redis"], pullPolicy="Never")},
                            "extraEnv": [{"name": "RETAIL_CHECKOUT_PERSISTENCE_REDIS_KEY_PREFIX", "value": "retail:ci:"}]})
         else:
             values["app"] = {"endpoints": {"catalog": "http://catalog:80", "carts": "http://carts:80",
@@ -216,14 +221,51 @@ class E2E:
                              "chat": {"enabled": False}, "search": {"enabled": False}}
         return values
 
+    def prepare_kind_fixtures(self):
+        # Pull on the runner before creating pods. A registry limit must fail at
+        # this bounded preparation step, not leave a pod in ImagePullBackOff.
+        directory = self.kubeconfig.parent / (self.name + "-fixtures")
+        directory.mkdir(parents=True, exist_ok=False)
+        self.fixture_directory = directory
+        prepared = {}
+        for name, fixture in KIND_FIXTURES.items():
+            reference = fixture["repository"] + ":" + fixture["tag"]
+            for attempt in range(3):
+                try:
+                    self.run(["docker", "pull", "--platform", "linux/amd64", reference], timeout=180)
+                    break
+                except (RuntimeError, subprocess.TimeoutExpired) as error:
+                    if attempt == 2:
+                        raise RuntimeError(f"Fixture pull failed after 3 attempts: {reference}\n{error}") from error
+                    delay = 5 * (2 ** attempt)
+                    print(f"Retrying fixture {reference} in {delay}s ({attempt + 1}/3)", flush=True)
+                    time.sleep(delay)
+            # Docker 29 may retain a multi-platform index after a platform pull.
+            # Export only amd64 so Kind never imports absent platform children.
+            archive = directory / (name + ".tar")
+            self.run(["docker", "image", "save", "--platform", "linux/amd64",
+                      "--output", archive, reference], timeout=300)
+            prepared[name] = {"reference": reference, "platform": "linux/amd64", "archive": archive.name,
+                              "config_digest": archive_config_id(archive, reference),
+                              "archive_sha256": sha256_file(archive)}
+        self.evidence["kind_fixtures"] = prepared
+        json_file(self.report / "kind-fixtures.json", prepared)
+
     def start_kind(self):
         image = self.env.get("KIND_NODE_IMAGE", "")
         require(re.fullmatch(r"kindest/node:v1\.35\.\d+@sha256:[0-9a-f]{64}", image), "Pin a verified Kind 1.35 image digest")
         self.kubeconfig.parent.mkdir(parents=True, exist_ok=True)
         require(not self.kubeconfig.exists(), "Refusing existing kubeconfig")
+        self.prepare_kind_fixtures()
         self.started = True
         self.run(["kind", "create", "cluster", "--name", self.name, "--kubeconfig", self.kubeconfig,
                   "--image", image, "--wait", "180s"], timeout=360)
+        for fixture in self.evidence["kind_fixtures"].values():
+            archive = self.fixture_directory / fixture["archive"]
+            require(sha256_file(archive) == fixture["archive_sha256"], "Fixture archive checksum mismatch")
+            require(archive_config_id(archive, fixture["reference"]) == fixture["config_digest"],
+                    "Fixture archive config mismatch")
+            self.run(["kind", "load", "image-archive", "--name", self.name, archive], timeout=300)
         self.run(self.kubectl("create", "namespace", self.namespace))
         self.run(self.kubectl("apply", "-f", "scripts/ci/fixtures/mysql.json"))
         self.run(self.kubectl("rollout", "status", "statefulset/mysql", "--timeout=600s"), timeout=630)
@@ -237,23 +279,13 @@ class E2E:
             self.run(["helm", "lint", chart, "-f", values])
             rendered = self.run(["helm", "template", RELEASE[service], chart, "--namespace", self.namespace, "-f", values])
             (self.report / (service + ".rendered.yaml")).write_text(rendered, encoding="utf-8")
-            install = self.helm("upgrade", "--install", RELEASE[service], chart, "-f", values, "--timeout", "600s")
-            if service != "orders":
-                install.append("--wait")
+            install = self.helm("upgrade", "--install", RELEASE[service], chart, "-f", values, "--timeout", "600s", "--wait")
             self.run(install, timeout=660)
             if service == "orders":
-                env = [{"name": "RABBITMQ_DEFAULT_" + suffix, "valueFrom": {"secretKeyRef": {
-                    "name": "orders-rabbitmq", "key": "RETAIL_ORDERS_MESSAGING_RABBITMQ_" + key}}}
-                    for suffix, key in (("USER", "USERNAME"), ("PASS", "PASSWORD"))]
-                patch = {"spec": {"template": {"spec": {"containers": [{"name": "rabbitmq", "env": env}]}}}}
-                self.run(self.kubectl("patch", "statefulset/orders-rabbitmq", "--type=strategic", "--patch", json.dumps(patch)))
                 self.run(self.kubectl("rollout", "status", "statefulset/orders-rabbitmq", "--timeout=600s"), timeout=630)
-                self.run(self.kubectl("rollout", "status", "deployment/orders", "--timeout=600s"), timeout=630)
-            else:
-                # Check the Deployment directly before reading runtime image IDs.
-                # Helm can return while a newly started UI container is not ready.
-                self.run(self.kubectl("rollout", "status", "deployment/" + RELEASE[service],
-                                      "--timeout=600s"), timeout=630)
+            # Check the Deployment directly before reading runtime image IDs.
+            self.run(self.kubectl("rollout", "status", "deployment/" + RELEASE[service],
+                                  "--timeout=600s"), timeout=630)
         self.verify_kind()
         for service in SERVICES:
             self.start_forward(service)
@@ -389,6 +421,9 @@ class E2E:
             self.diagnostic("describe.txt", self.kubectl("describe", "pods"))
             self.diagnostic("mysql.log", self.kubectl("logs", "statefulset/mysql", "--tail=300"))
             self.diagnostic("mysql.previous.log", self.kubectl("logs", "statefulset/mysql", "--previous", "--tail=300"))
+            self.diagnostic("rabbitmq.log", self.kubectl("logs", "statefulset/orders-rabbitmq", "--tail=300"))
+            self.diagnostic("rabbitmq.previous.log", self.kubectl("logs", "statefulset/orders-rabbitmq", "--previous", "--tail=300"))
+            self.diagnostic("redis.log", self.kubectl("logs", "deployment/checkout-redis", "--tail=300"))
             for service in SERVICES:
                 self.diagnostic(service + ".log", self.kubectl("logs", "deployment/" + RELEASE[service], "--all-containers=true", "--tail=300"))
         else:
@@ -398,12 +433,20 @@ class E2E:
     def cleanup(self):
         for forward in self.forwards.values():
             self.stop_forward(forward)
-        if self.started:
-            if self.mode == "kind":
-                self.run(["kind", "delete", "cluster", "--name", self.name], timeout=180)
-            else:
-                self.run(self.compose("down", "--volumes", "--remove-orphans", "--timeout", "30"), timeout=120)
-        self.kubeconfig.unlink(missing_ok=True)
+        try:
+            if self.started:
+                if self.mode == "kind":
+                    self.run(["kind", "delete", "cluster", "--name", self.name], timeout=180)
+                else:
+                    self.run(self.compose("down", "--volumes", "--remove-orphans", "--timeout", "30"), timeout=120)
+        finally:
+            if self.started:
+                self.kubeconfig.unlink(missing_ok=True)
+            directory = getattr(self, "fixture_directory", None)
+            if directory is not None:
+                for name in KIND_FIXTURES:
+                    (directory / (name + ".tar")).unlink(missing_ok=True)
+                directory.rmdir()
 
     def execute(self):
         self.run([sys.executable, APP / "scripts/ci/images.py", "verify", "--directory", self.directory, "--load"], timeout=600)

@@ -152,8 +152,8 @@ def inspect_image(reference, expected_id=None):
     return image_id
 
 
-def archive_config(path, image):
-    """Read archive config without extracting untrusted paths."""
+def archive_config_id(path, expected_tag):
+    """Validate a single-platform archive and return its actual config digest."""
     with tarfile.open(regular_file(path), mode="r:*") as archive:
         members = archive.getmembers()
 
@@ -168,19 +168,37 @@ def archive_config(path, image):
         manifest = parse_json(read_member("manifest.json", 1024 * 1024))
         require(isinstance(manifest, list) and len(manifest) == 1, "Archive must contain exactly one image")
         entry = manifest[0]
+        require(isinstance(entry, dict), "Invalid archive manifest entry")
         tags = entry.get("RepoTags") or []
+
+        def canonical_tag(tag):
+            if tag.startswith("docker.io/"):
+                return tag
+            if "/" not in tag:
+                return "docker.io/library/" + tag
+            registry = tag.split("/", 1)[0]
+            if "." in registry or ":" in registry or registry == "localhost":
+                return tag
+            return "docker.io/" + tag
+
         require(isinstance(tags, list) and all(isinstance(tag, str) for tag in tags)
-                and {tag.removeprefix("docker.io/") for tag in tags}
-                == {image["local_tag"].removeprefix("docker.io/")}, "Archive tag differs from metadata")
+                and {canonical_tag(tag) for tag in tags} == {canonical_tag(expected_tag)},
+                "Archive tag differs from metadata")
         config_name = entry.get("Config", "")
         require(isinstance(config_name, str) and bool(config_name), "Missing archive config")
         config_path = PurePosixPath(config_name)
         require(not config_path.is_absolute() and ".." not in config_path.parts, "Unsafe archive path")
         config_bytes = read_member(config_name, 16 * 1024 * 1024)
-        require(hmac.compare_digest("sha256:" + hashlib.sha256(config_bytes).hexdigest(), image["image_id"]),
-                "Archive config differs from recorded image ID")
         config = parse_json(config_bytes)
-        require(config.get("os") == "linux" and config.get("architecture") == "amd64", "Wrong archive platform")
+        require(isinstance(config, dict) and config.get("os") == "linux"
+                and config.get("architecture") == "amd64", "Wrong archive platform")
+        return "sha256:" + hashlib.sha256(config_bytes).hexdigest()
+
+
+def archive_config(path, image):
+    """Require an archive's config to match the recorded application image ID."""
+    actual = archive_config_id(path, image["local_tag"])
+    require(hmac.compare_digest(actual, image["image_id"]), "Archive config differs from recorded image ID")
 
 
 def validate_metadata(metadata, expected):

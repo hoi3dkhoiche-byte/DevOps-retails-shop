@@ -122,6 +122,10 @@ Fixture Java/MySQL dùng `sslMode=REQUIRED` để đăng nhập qua TLS ngay khi
 
 Compose mount `src/app/mysql-init.sql`; ConfigMap của Kind dùng cùng nội dung dưới tên `10-retail.sql`. Entrypoint MySQL tự chạy SQL bằng socket và tài khoản root của temporary server, kể cả khi TCP chưa mở. Kind đặt socket tại `/var/lib/mysql/ci-fixture.sock` để kiểm tra trường hợp khác mặc định của client; readiness và kiểm tra persistence dùng TCP, xác thực đủ ba user/database ứng dụng.
 
+Kind lấy cả ba fixture từ Docker Hub: `mysql:8.4.11`, `rabbitmq:4.2.0-management`, `redis:7.4.2-alpine`. Runner pull trước khi tạo cluster, tối đa ba lần với timeout 180 giây/lần và chờ 5/10 giây giữa các lần thử. Sau đó export archive chỉ `linux/amd64`, đọc config digest thực từ archive, ghi checksum rồi kiểm lại trước khi nạp vào Kind. Pod fixture dùng `imagePullPolicy: Never`, tránh pull từ ECR Public trong lúc E2E. RabbitMQ nhận Secret ngay khi tạo pod; readiness chờ cookie do broker tạo rồi chạy `check_running` bằng user `rabbitmq`, tránh probe tạo cookie thuộc root khi broker chưa khởi động.
+
+`kind-fixtures.json` trong artifact E2E ghi reference, platform, config digest và checksum của từng fixture. Archive fixture nằm ngoài thư mục report và được xoá khi cleanup; artifact report/log vẫn giữ 14 ngày. Năm archive ứng dụng tiếp tục tuân theo hợp đồng E2E/scan/publish riêng phía trên.
+
 E2E yêu cầu submit đơn qua backend thật, đọc record MySQL của Orders, restart rồi đối chiếu đơn hàng. Cart phải giữ đúng quantity và unit price sau restart; gate kiểm tra SQL, API và image ID trước/sau restart. Các bài kiểm tra local/Kind chưa nghiệm thu khả năng HA của tài nguyên AWS.
 
 ## Timeout, concurrency và artifacts
@@ -161,20 +165,17 @@ python3 -B -m unittest discover -s scripts/ci -p 'test_*.py' -v
 
 Các test âm kiểm tra zero/all-skipped/missing/stale native evidence, summary mâu thuẫn report, checksum/config mismatch, PR publish, scanner lỗi và push lỗi một phần. Chúng kiểm tra logic CI, không thay thế test ứng dụng hoặc E2E.
 
-| Kiểm tra đã quan sát                                          | Trạng thái                                                                                    |
-| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| Contract tests trên Windows                                   | 28 test đạt                                                                                   |
-| Parse Python/TOML/JSON/YAML                                   | Đạt ở lượt kiểm tra local                                                                     |
-| Compose config đủ năm image, không build, pull policy `never` | Đạt; chưa khởi chạy app stack                                                                 |
-| Clean Linux checkout: executable bit và LF                    | Đạt trên snapshot local qua Git checkout-index                                                |
-| Contract tests trên clean Linux snapshot                      | 28 test đạt                                                                                   |
-| actionlint 1.7.7                                              | Đạt                                                                                           |
-| Helm 3.19.0: lint và render digest cho năm chart              | Đạt                                                                                           |
-| Docker 29.7.2 save/load archive của scratch fixture           | Đạt; chỉ kiểm tra hợp đồng archive/ID                                                         |
-| Nx graph/affected thực tế trên Node 22 Alpine                 | Đạt: 14 projects; Cart chọn `cart`, README chọn rỗng; diff `HEAD~1..HEAD` chọn đủ năm service |
-| Full build/test ứng dụng, Cypress/Kind, Trivy và push thật    | Chưa có bằng chứng chạy đạt                                                                   |
-| Branch protection và thay đổi repository GitOps               | Chưa thực hiện                                                                                |
+| Kiểm tra đã quan sát                   | Trạng thái                                                         |
+| -------------------------------------- | ------------------------------------------------------------------ |
+| CI contracts trên Linux                | 45/45 đạt                                                          |
+| Source tests và build năm image        | Đạt trên GitHub run `41013265679`                                  |
+| Trivy của năm image                    | Đạt trên cùng GitHub run                                           |
+| Compose và Compose + OpenSearch        | Đạt trên cùng GitHub run                                           |
+| Helm 3.19.0: lint/render năm chart     | Đạt với bản sửa local                                              |
+| Kind với ba fixture preload, Docker 29 | Local đạt 14/14 Cypress, SQL/restart và ba lần đối chiếu năm image |
+| RabbitMQ cold start với probe mới      | Cookie đúng user, không restart; ba probe sớm không tạo cookie     |
+| GitHub run chứa bản sửa mới            | Chưa chạy; bản sửa local cần được commit/push                      |
 
-Chi tiết lệnh, phạm vi và giới hạn của kiểm tra local nằm ở [CI_VALIDATION.md](CI_VALIDATION.md).
+Kết quả runtime mới và phạm vi local nằm ở [ARCHITECTURE_VALIDATION.md](ARCHITECTURE_VALIDATION.md). Snapshot kiểm tra cú pháp ban đầu nằm ở [CI_VALIDATION.md](CI_VALIDATION.md).
 
 Trước khi dùng làm release: xác nhận Docker Hub repositories/token, điền đúng Variable/Secrets, đưa workflow lên GitHub, chạy và xem bằng chứng của từng gate, rồi yêu cầu `ci-required` trên `main`. Không tuyên bố pipeline xanh hoặc release hoàn tất chỉ dựa vào kiểm tra cú pháp/contract tests.

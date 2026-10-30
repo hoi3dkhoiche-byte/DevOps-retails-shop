@@ -28,6 +28,17 @@ spec:
         - name: rabbitmq
           image: "{{ .Values.rabbitmq.image.repository }}:{{ .Values.rabbitmq.image.tag }}"
           imagePullPolicy: {{ .Values.rabbitmq.image.pullPolicy }}
+          env:
+          - name: RABBITMQ_DEFAULT_USER
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Values.app.messaging.rabbitmq.secret.name | quote }}
+                key: RETAIL_ORDERS_MESSAGING_RABBITMQ_USERNAME
+          - name: RABBITMQ_DEFAULT_PASS
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Values.app.messaging.rabbitmq.secret.name | quote }}
+                key: RETAIL_ORDERS_MESSAGING_RABBITMQ_PASSWORD
           ports:
           - name: amqp
             containerPort: 5672
@@ -35,6 +46,16 @@ spec:
           - name: http
             containerPort: 15672
             protocol: TCP
+          readinessProbe:
+            exec:
+              # Wait for the broker's cookie, then run diagnostics as its user.
+              command:
+              - sh
+              - -ec
+              - test -s /var/lib/rabbitmq/.erlang.cookie && exec gosu rabbitmq rabbitmq-diagnostics -q check_running
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 60
           volumeMounts:
           - name: data
             mountPath: "/var/lib/rabbitmq/mnesia"
