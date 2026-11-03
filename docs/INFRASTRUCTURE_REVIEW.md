@@ -2,6 +2,31 @@
 
 Ngày kiểm tra: 03/11/2026. Kết quả bên dưới đối chiếu code, kiểm tra Docker Hub read-only và chạy backend fixture cô lập trên máy; không phải biên bản triển khai AWS.
 
+## Bổ sung mục 8–10 sau commit `7da3973`
+
+| Mục đánh giá | Kết luận hiện tại | Xử lý |
+| --- | --- | --- |
+| 8. EKS support field | Lỗi cũ là đúng nhưng đã được sửa và push trong `7da39736b2c1fcf49fc61cbed48de2bfb416ad76` | Giữ `versionStatus` và fallback chuẩn hóa `status`; các regression vẫn chạy |
+| 8. OpenSearch instance/storage | Đúng: trước đó mới kiểm tra engine | Thêm `DescribeInstanceTypeLimits` cho đúng `OpenSearch_3.3`/`r8g.medium.search`, một data node, gp3 50 GiB; kiểm tra số node/dung lượng và giới hạn không dùng dedicated masters |
+| 9. Private repository credentials | Đúng nếu repo private. Kiểm tra API GitHub hiện cho thấy cả source và GitOps đều `private=false`, nên chưa có lỗi xác thực hiện tại | Thêm tùy chọn ESO `repo-creds` áp dụng cho cả hai repo, mặc định tắt; chờ credential Ready khi bootstrap; Actions checkout private source dùng Secret riêng |
+| 10. Load Balancer Controller policy | Không thiếu quyền theo release đang pin | Policy hiện tại khớp hoàn toàn upstream controller `v3.6.2`/chart `3.6.2`; giữ nguyên quyền, thêm provenance/checksum và test chống lệch |
+
+Kiểm chứng đợt bổ sung: 35 test Python infra, 6 native test Terraform với provider giả lập (gồm kiểm tra IAM credential chỉ dành cho ESO) và 45 test GitOps đều đạt; đã render thêm toàn bộ 10 chart platform. Chưa gọi API AWS bằng account triển khai hoặc kiểm chứng credential của một repo private thật.
+
+### Mục 8: kiểm tra trước plan
+
+`describe-instance-type-limits` truy vấn cặp engine/type thực tế ở Singapore và trả giới hạn storage/node. Preflight từ chối dữ liệu thiếu/sai hoặc cấu hình nằm ngoài giới hạn; API lỗi hoặc thiếu `es:DescribeInstanceTypeLimits` cũng phải dừng. Test dùng response theo schema AWS; chưa có kết quả API từ account triển khai để khẳng định cỡ máy đang được cung cấp. [API AWS](https://docs.aws.amazon.com/opensearch-service/latest/APIReference/API_DescribeInstanceTypeLimits.html)
+
+### Mục 9: hai repo và ba nơi sử dụng credential
+
+Argo CD lấy chart từ source repo và values từ GitOps repo; credential chỉ cho một repo không đủ khi cả hai private. Secret kiểu `repo-creds` dùng URL prefix `https://github.com/hoi3dkhoiche-byte/` cho cả hai URL đã khai báo. ESO đọc JSON `username`/`password` từ `/retail/platform/argocd/repositories`; token chỉ cần quyền đọc Contents cho hai repo. Token không nằm trong Git và backend Job không được đọc/ghi Secret này. Khi tùy chọn bật, bootstrap đợi `argocd-repositories` Ready trước Argo CD/root. [Argo CD credential templates](https://argo-cd.readthedocs.io/en/stable/user-guide/private-repositories/#credential-templates)
+
+Tách rõ: operator cần quyền Git để clone ban đầu; Argo CD dùng credential AWS/ESO để reconcile; workflow validation ở repo GitOps dùng Actions Secret `SOURCE_READ_TOKEN` nếu source private. `GITOPS_TOKEN` của CI tạo PR image là credential có nhiệm vụ khác. Hướng dẫn chi tiết ở [infra runbook](../scripts/infra/README.md) và repo GitOps đang duy trì.
+
+### Mục 10: đối chiếu đúng phiên bản
+
+Đã đối chiếu toàn bộ JSON, gồm action/resource/condition, với policy chính thức tại commit bất biến `d19307ccb61acb577ebeb9ffbf20d19047e7a275`: khớp đủ 86 action entries. Policy này cũng không có `DescribeIpPools`; tài liệu IAM ELBv2 có `ModifyIpPools` nhưng không có action được suy đoán kia. Không thêm quyền chỉ vì tên nghe tương ứng. Nguồn và canonical SHA256 nằm trong [provenance](../infra/retail-lab/policies/load-balancer-controller.provenance.json), được kiểm tra bằng test offline. [Policy upstream](https://github.com/kubernetes-sigs/aws-load-balancer-controller/blob/d19307ccb61acb577ebeb9ffbf20d19047e7a275/docs/install/iam_policy.json), [IAM ELBv2 actions](https://docs.aws.amazon.com/service-authorization/latest/reference/list_elbv2.html)
+
 ## Kết luận và thay đổi
 
 | Mục đánh giá | Kết luận | Thay đổi trong đợt sửa |

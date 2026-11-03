@@ -1,5 +1,5 @@
 resource "aws_secretsmanager_secret" "monitoring" {
-  for_each                = toset(["grafana/admin", "alertmanager/config", "argocd/admin", "argocd/redis"])
+  for_each                = toset(["grafana/admin", "alertmanager/config", "argocd/admin", "argocd/redis", "argocd/repositories"])
   name                    = "/retail/platform/${each.key}"
   recovery_window_in_days = 7
 }
@@ -18,7 +18,7 @@ resource "aws_iam_role_policy" "eso_argocd" {
   policy = jsonencode({ Version = "2012-10-17", Statement = [{
     Effect   = "Allow"
     Action   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
-    Resource = [for key in ["argocd/admin", "argocd/redis"] : aws_secretsmanager_secret.monitoring[key].arn]
+    Resource = [for key in ["argocd/admin", "argocd/redis", "argocd/repositories"] : aws_secretsmanager_secret.monitoring[key].arn]
   }] })
 }
 

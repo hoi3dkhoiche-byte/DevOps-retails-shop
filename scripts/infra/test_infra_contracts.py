@@ -83,6 +83,7 @@ class RegionalPreflightTests(unittest.TestCase):
         if operation == "describe-broker-engine-types": return {"brokerEngineTypes": [{"engineVersions": [{"name": "4.2"}]}]}
         if operation == "describe-broker-instance-options": return {"brokerInstanceOptions": [{"supportedDeploymentModes": ["CLUSTER_MULTI_AZ"]}]}
         if operation == "list-versions": return {"Versions": ["OpenSearch_3.3"]}
+        if operation == "describe-instance-type-limits": return search_limits()
         if operation == "get-role": return {"Role": search_role()}
         if operation == "describe-secret": return {"VersionIdsToStages": {"version-id": ["AWSCURRENT"]}}
         if operation == "head-bucket": return {}
@@ -93,6 +94,9 @@ class RegionalPreflightTests(unittest.TestCase):
             preflight.check(self.config)
             operations = [call.args[1] for call in aws.call_args_list]
             self.assertIn("describe-broker-instance-options", operations)
+            self.assertIn("describe-instance-type-limits", operations)
+            aws.assert_any_call("opensearch", "describe-instance-type-limits", "--engine-version", "OpenSearch_3.3",
+                                "--instance-type", "r8g.medium.search")
             self.assertNotIn("get-secret-value", operations)
 
     def test_unsupported_or_old_addon_fails(self):
@@ -122,6 +126,89 @@ class RegionalPreflightTests(unittest.TestCase):
             with self.subTest(fields=fields), patch.object(preflight, "aws", return_value={
                     "clusterVersions": [{"clusterVersion": "1.36", **fields}]}), self.assertRaises(ValueError):
                 preflight.check(self.config)
+
+    def test_instance_limits_api_failure_stops_preflight(self):
+        def unsupported(service, operation, *args):
+            if operation == "describe-instance-type-limits":
+                raise subprocess.CalledProcessError(254, ["aws"], stderr="An error occurred (InvalidTypeException)")
+            return self.aws(service, operation, *args)
+        with patch.object(preflight, "aws", side_effect=unsupported), self.assertRaisesRegex(ValueError, "DescribeInstanceTypeLimits failed"):
+            preflight.check(self.config)
+
+
+def search_limits():
+    # AWS DescribeInstanceTypeLimits shape: counts are numbers, storage bounds strings.
+    return {"LimitsByRole": {"data": {
+        "AdditionalLimits": [{"LimitName": "MaximumNumberOfDataNodesWithoutMasterNode", "LimitValues": ["10"]}],
+        "InstanceLimits": {"InstanceCountLimits": {"MinimumInstanceCount": 1, "MaximumInstanceCount": 80}},
+        "StorageTypes": [{"StorageTypeName": "ebs", "StorageSubTypeName": "gp3", "StorageTypeLimits": [
+            {"LimitName": "MinimumVolumeSize", "LimitValues": ["10"]},
+            {"LimitName": "MaximumVolumeSize", "LimitValues": ["1024"]},
+        ]}],
+    }}}
+
+
+class SearchInstanceLimitsTests(unittest.TestCase):
+    def test_single_data_node_with_gp3_50_gib_is_supported(self):
+        preflight.check_search_instance_limits(search_limits())
+
+    def test_missing_or_wrong_node_role_is_rejected(self):
+        for payload in (None, {}, {"LimitsByRole": {"master": search_limits()["LimitsByRole"]["data"]}},
+                        {"LimitsByRole": {"data": None}}):
+            with self.subTest(payload=payload), self.assertRaisesRegex(ValueError, "data-node count limits"):
+                preflight.check_search_instance_limits(payload)
+
+    def test_instance_count_must_fit_available_data_node_limits(self):
+        for counts in ({}, {"MinimumInstanceCount": 2, "MaximumInstanceCount": 80},
+                       {"MinimumInstanceCount": 1, "MaximumInstanceCount": 0},
+                       {"MinimumInstanceCount": True, "MaximumInstanceCount": 80},
+                       {"MinimumInstanceCount": "1", "MaximumInstanceCount": 80}):
+            payload = search_limits()
+            payload["LimitsByRole"]["data"]["InstanceLimits"]["InstanceCountLimits"] = counts
+            with self.subTest(counts=counts), self.assertRaises(ValueError):
+                preflight.check_search_instance_limits(payload)
+
+    def test_unavailable_gp3_or_non_ebs_storage_is_rejected(self):
+        for storage in ([], [{"StorageTypeName": "ebs", "StorageSubTypeName": "gp2"}],
+                        [{"StorageTypeName": "instance", "StorageSubTypeName": "gp3"}], None):
+            payload = search_limits()
+            payload["LimitsByRole"]["data"]["StorageTypes"] = storage
+            with self.subTest(storage=storage), self.assertRaises(ValueError):
+                preflight.check_search_instance_limits(payload)
+
+    def test_standalone_domain_must_fit_additional_no_master_limit(self):
+        for additional in (None,
+                           [{"LimitName": "MaximumNumberOfDataNodesWithoutMasterNode", "LimitValues": ["0"]}],
+                           [{"LimitName": "MaximumNumberOfDataNodesWithoutMasterNode", "LimitValues": ["unknown"]}],
+                           search_limits()["LimitsByRole"]["data"]["AdditionalLimits"] * 2):
+            payload = search_limits()
+            payload["LimitsByRole"]["data"]["AdditionalLimits"] = additional
+            with self.subTest(additional=additional), self.assertRaises(ValueError):
+                preflight.check_search_instance_limits(payload)
+
+    def test_volume_size_must_fit_gp3_bounds(self):
+        for minimum, maximum in (("100", "1024"), ("10", "40"), ("0", "1024"), ("100", "10")):
+            payload = search_limits()
+            limits = payload["LimitsByRole"]["data"]["StorageTypes"][0]["StorageTypeLimits"]
+            limits[0]["LimitValues"] = [minimum]
+            limits[1]["LimitValues"] = [maximum]
+            with self.subTest(minimum=minimum, maximum=maximum), self.assertRaises(ValueError):
+                preflight.check_search_instance_limits(payload)
+
+    def test_missing_malformed_or_ambiguous_storage_metadata_is_rejected(self):
+        valid = search_limits()["LimitsByRole"]["data"]["StorageTypes"][0]["StorageTypeLimits"]
+        for limits in (None, [], valid[:1], valid + [valid[0]],
+                       [{"LimitName": "MinimumVolumeSize", "LimitValues": ["10", "20"]}, valid[1]],
+                       [{"LimitName": "MinimumVolumeSize", "LimitValues": ["unknown"]}, valid[1]],
+                       [{"LimitName": "MinimumVolumeSize", "LimitValues": [True]}, valid[1]]):
+            payload = search_limits()
+            payload["LimitsByRole"]["data"]["StorageTypes"][0]["StorageTypeLimits"] = limits
+            with self.subTest(limits=limits), self.assertRaises(ValueError):
+                preflight.check_search_instance_limits(payload)
+        payload = search_limits()
+        payload["LimitsByRole"]["data"]["StorageTypes"] *= 2
+        with self.assertRaisesRegex(ValueError, "unambiguous"):
+            preflight.check_search_instance_limits(payload)
 
 
 def search_role(name="AWSServiceRoleForAmazonOpenSearchService"):

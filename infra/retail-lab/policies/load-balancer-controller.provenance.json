@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "controller_release": "v3.6.2",
+  "helm_chart_version": "3.6.2",
+  "upstream_repository": "kubernetes-sigs/aws-load-balancer-controller",
+  "upstream_commit": "d19307ccb61acb577ebeb9ffbf20d19047e7a275",
+  "upstream_path": "docs/install/iam_policy.json",
+  "upstream_url": "https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/d19307ccb61acb577ebeb9ffbf20d19047e7a275/docs/install/iam_policy.json",
+  "canonical_json_sha256": "bb9e48240ace4258c78d152ce98175ee6a118f0715faad4ff5a3e394c9d66171"
+}

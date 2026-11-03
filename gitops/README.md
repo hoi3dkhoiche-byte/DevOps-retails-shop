@@ -2,6 +2,8 @@
 
 The maintained deployment repository is now [DevOps-retails-shop-gitops](https://github.com/hoi3dkhoiche-byte/DevOps-retails-shop-gitops). This directory is the original seed; use the standalone repository's current README, activation checks and bootstrap scripts for deployment. Copying this seed over the published repository would discard later fixes.
 
+Private repositories require Argo CD read access to **both** this project's source charts and GitOps values. The maintained repository supports an optional ESO-backed repository credential template under the GitHub owner URL prefix; see its current README and the source [infrastructure runbook](../scripts/infra/README.md). Those optional credentials are not implemented by the historical seed bootstrap below.
+
 ## Original seed instructions (historical)
 
 Copy the **contents of this directory** into `hoi3dkhoiche-byte/DevOps-retails-shop-gitops` on `main` after preparing its account-specific values. This directory is the reviewable seed; creating it does not publish the GitOps repository or deploy AWS resources.

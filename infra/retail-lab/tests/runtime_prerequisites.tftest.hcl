@@ -14,6 +14,12 @@ mock_provider "aws" {
   mock_resource "aws_eks_cluster" {
     defaults = { identity = [{ oidc = [{ issuer = "https://oidc.eks.ap-southeast-1.amazonaws.com/id/OFFLINE" }] }] }
   }
+  mock_resource "aws_iam_role" {
+    defaults = { arn = "arn:aws:iam::111122223333:role/offline-role" }
+  }
+  mock_resource "aws_launch_template" {
+    defaults = { id = "lt-0123456789abcdef0", latest_version = 1 }
+  }
   mock_resource "aws_eks_node_group" {
     defaults = { resources = [{ autoscaling_groups = [{ name = "offline-asg" }] }] }
   }
@@ -108,5 +114,24 @@ run "fresh_account_creates_modern_role" {
   assert {
     condition     = aws_iam_service_linked_role.opensearch[0].aws_service_name == "opensearchservice.amazonaws.com"
     error_message = "The created role must belong to Amazon OpenSearch Service."
+  }
+}
+
+run "repository_credentials_are_only_read_by_argocd_eso" {
+  command = apply
+
+  assert {
+    condition = contains(
+      jsondecode(aws_iam_role_policy.eso_argocd.policy).Statement[0].Resource,
+      aws_secretsmanager_secret.monitoring["argocd/repositories"].arn
+    )
+    error_message = "Argo CD's ESO reader must be able to read the repository credential container."
+  }
+  assert {
+    condition = alltrue([
+      for statement in jsondecode(aws_iam_role_policy.backend_bootstrap.policy).Statement :
+      !contains(statement.Resource, aws_secretsmanager_secret.monitoring["argocd/repositories"].arn)
+    ])
+    error_message = "The backend bootstrap Job must not read or overwrite repository credentials."
   }
 }

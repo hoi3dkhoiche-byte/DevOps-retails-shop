@@ -13,6 +13,12 @@ SEARCH_SERVICE_ROLES = {
     "AWSServiceRoleForAmazonOpenSearchService": "opensearchservice.amazonaws.com",
     "AWSServiceRoleForAmazonElasticsearchService": "es.amazonaws.com",
 }
+# Keep this tuple aligned with Search in infra/retail-lab/backends.tf.
+SEARCH_ENGINE_VERSION = "OpenSearch_3.3"
+SEARCH_INSTANCE_TYPE = "r8g.medium.search"
+SEARCH_INSTANCE_COUNT = 1
+SEARCH_STORAGE_TYPE = "gp3"
+SEARCH_VOLUME_GIB = 50
 
 
 def aws(service, operation, *arguments):
@@ -76,6 +82,61 @@ def check_search_service_role(config):
                          "or provision it before planning.")
 
 
+def check_search_instance_limits(result):
+    """Reject unknown limits rather than assuming the selected domain is supported."""
+    roles = result.get("LimitsByRole") if isinstance(result, dict) else None
+    data = roles.get("data") if isinstance(roles, dict) else None
+    instance = data.get("InstanceLimits") if isinstance(data, dict) else None
+    counts = instance.get("InstanceCountLimits") if isinstance(instance, dict) else None
+    minimum = counts.get("MinimumInstanceCount") if isinstance(counts, dict) else None
+    maximum = counts.get("MaximumInstanceCount") if isinstance(counts, dict) else None
+    if (type(minimum) is not int or type(maximum) is not int
+            or not 1 <= minimum <= maximum):
+        raise ValueError("Missing or invalid OpenSearch data-node count limits")
+    if not minimum <= SEARCH_INSTANCE_COUNT <= maximum:
+        raise ValueError("Selected OpenSearch instance count is outside the regional data-node limits")
+    additional = data.get("AdditionalLimits", [])
+    if not isinstance(additional, list):
+        raise ValueError("Invalid OpenSearch additional instance limits")
+    standalone = [item for item in additional if isinstance(item, dict)
+                  and item.get("LimitName") == "MaximumNumberOfDataNodesWithoutMasterNode"]
+    if standalone:
+        values = standalone[0].get("LimitValues")
+        if (len(standalone) != 1 or not isinstance(values, list) or len(values) != 1
+                or not isinstance(values[0], str) or re.fullmatch(r"[0-9]+", values[0]) is None):
+            raise ValueError("Invalid OpenSearch data-node limit without dedicated master nodes")
+        if SEARCH_INSTANCE_COUNT > int(values[0]):
+            raise ValueError("Selected OpenSearch data nodes require dedicated master nodes")
+    storage_types = data.get("StorageTypes", [])
+    if not isinstance(storage_types, list):
+        raise ValueError("Missing or invalid OpenSearch storage types")
+    storage = [item for item in storage_types if isinstance(item, dict)
+               and item.get("StorageTypeName") == "ebs" and item.get("StorageSubTypeName") == SEARCH_STORAGE_TYPE]
+    if len(storage) != 1:
+        raise ValueError("OpenSearch " + SEARCH_INSTANCE_TYPE + " / " + SEARCH_ENGINE_VERSION
+                         + " must offer one unambiguous EBS " + SEARCH_STORAGE_TYPE + " limit entry")
+    limits = storage[0].get("StorageTypeLimits")
+    if not isinstance(limits, list):
+        raise ValueError("Missing OpenSearch EBS volume-size limits")
+    sizes = {}
+    for item in limits:
+        if not isinstance(item, dict) or item.get("LimitName") not in {"MinimumVolumeSize", "MaximumVolumeSize"}:
+            continue
+        name = item["LimitName"]
+        values = item.get("LimitValues")
+        if (name in sizes or not isinstance(values, list) or len(values) != 1
+                or not isinstance(values[0], str) or re.fullmatch(r"[0-9]+", values[0]) is None):
+            raise ValueError("Missing or ambiguous OpenSearch EBS volume-size limits")
+        sizes[name] = int(values[0])
+    minimum = sizes.get("MinimumVolumeSize", 0)
+    maximum = sizes.get("MaximumVolumeSize", 0)
+    if not 1 <= minimum <= maximum:
+        raise ValueError("Missing or invalid OpenSearch EBS volume-size bounds")
+    if not minimum <= SEARCH_VOLUME_GIB <= maximum:
+        raise ValueError("Selected OpenSearch " + str(SEARCH_VOLUME_GIB)
+                         + " GiB EBS volume is outside the regional " + SEARCH_STORAGE_TYPE + " limits")
+
+
 def check(config):
     versions = aws("eks", "describe-cluster-versions", "--cluster-versions", "1.36").get("clusterVersions", [])
     if not any(item.get("clusterVersion") == "1.36" and standard_support(item) for item in versions):
@@ -104,8 +165,15 @@ def check(config):
     if not any("CLUSTER_MULTI_AZ" in item.get("supportedDeploymentModes", []) for item in broker_options.get("brokerInstanceOptions", [])):
         raise ValueError("mq.m7g.large does not offer CLUSTER_MULTI_AZ in Singapore")
     search = aws("opensearch", "list-versions")
-    if "OpenSearch_3.3" not in search.get("Versions", []):
+    if SEARCH_ENGINE_VERSION not in search.get("Versions", []):
         raise ValueError("Amazon OpenSearch 3.3 is unavailable in Singapore")
+    try:
+        limits = aws("opensearch", "describe-instance-type-limits", "--engine-version", SEARCH_ENGINE_VERSION,
+                     "--instance-type", SEARCH_INSTANCE_TYPE)
+    except subprocess.CalledProcessError as error:
+        raise ValueError("Cannot verify OpenSearch " + SEARCH_INSTANCE_TYPE + " / " + SEARCH_ENGINE_VERSION
+                         + " in Singapore: DescribeInstanceTypeLimits failed; check regional support and IAM permissions") from error
+    check_search_instance_limits(limits)
     check_search_service_role(config)
     aws("s3api", "head-bucket", "--bucket", "manhnguyen1131")
     # Only metadata is read; preflight never retrieves credential values.
