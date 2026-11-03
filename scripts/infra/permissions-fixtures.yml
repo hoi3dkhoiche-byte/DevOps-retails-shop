@@ -1,0 +1,31 @@
+# Disposable local permission tests; these are not application/AWS backends.
+name: retail-backend-permissions
+services:
+  rabbit:
+    image: rabbitmq:4.2.0-management@sha256:6431bbd0f22df99ace800138399367d7d6181442dfff09feb2795e15d4bd4b7a
+    environment:
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: ${PERMISSIONS_FIXTURE_ADMIN_PASSWORD:?Set a disposable fixture password}
+    ports:
+      - "127.0.0.1:5683:5672"
+      - "127.0.0.1:15683:15672"
+    mem_limit: 512m
+    healthcheck:
+      test: [CMD, rabbitmq-diagnostics, -q, ping]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+  search:
+    image: opensearchproject/opensearch:3.3.0@sha256:d96afaf6cbd2a6a3695aeb2f1d48c9a16ad5c8918eb849e5cbf43475f0f8e146
+    environment:
+      discovery.type: single-node
+      OPENSEARCH_INITIAL_ADMIN_PASSWORD: ${PERMISSIONS_FIXTURE_ADMIN_PASSWORD:?Set a disposable fixture password}
+      OPENSEARCH_JAVA_OPTS: -Xms512m -Xmx512m
+    ports:
+      - "127.0.0.1:19283:9200"
+    mem_limit: 2g
+    healthcheck:
+      test: [CMD-SHELL, "curl -ksS --fail -u admin:\"$$OPENSEARCH_INITIAL_ADMIN_PASSWORD\" https://localhost:9200/_cluster/health >/dev/null"]
+      interval: 5s
+      timeout: 10s
+      retries: 60

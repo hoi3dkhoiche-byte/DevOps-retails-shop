@@ -1,6 +1,7 @@
 output "cluster_name" { value = aws_eks_cluster.retail.name }
 output "cluster_endpoint" { value = aws_eks_cluster.retail.endpoint }
 output "vpc_id" { value = aws_vpc.retail.id }
+output "s3_gateway_endpoint_id" { value = aws_vpc_endpoint.s3.id }
 output "public_subnet_ids" { value = aws_subnet.public[*].id }
 output "mysql_endpoint" { value = aws_db_instance.mysql.address }
 output "mysql_master_secret_arn" { value = aws_db_instance.mysql.master_user_secret[0].secret_arn }

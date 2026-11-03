@@ -52,7 +52,16 @@ resource "aws_secretsmanager_secret" "application" {
 # never enter a Terraform variable, data source, plan, output or state file.
 # Populate the platform secrets before applying this stack.
 resource "aws_cloudformation_stack" "managed_backends" {
-  name = "retail-lab-managed-backends"
+  name       = "retail-lab-managed-backends"
+  depends_on = [aws_iam_service_linked_role.opensearch, data.aws_iam_roles.opensearch]
+  lifecycle {
+    precondition {
+      condition = var.create_opensearch_service_linked_role || length(setintersection(
+        toset(local.opensearch_service_linked_role_arns), try(data.aws_iam_roles.opensearch[0].arns, toset([]))
+      )) > 0
+      error_message = "OpenSearch VPC domains require the account service-linked role. Reuse an existing OpenSearch/Elasticsearch role, or set create_opensearch_service_linked_role=true for a fresh account. Import an existing modern role before transferring ownership to Terraform."
+    }
+  }
   template_body = jsonencode({
     AWSTemplateFormatVersion = "2010-09-09"
     Resources = {

@@ -49,12 +49,25 @@ jobs:
       - run: terraform -chdir=infra/retail-lab fmt -check -recursive
       - run: terraform -chdir=infra/retail-lab init -backend=false -input=false -lockfile=readonly
       - run: terraform -chdir=infra/retail-lab validate -no-color
+      - name: Test VPC endpoint and OpenSearch role prerequisites without AWS
+        run: terraform -chdir=infra/retail-lab test -no-color
       - run: python3 -B -m unittest discover -s scripts/infra -p 'test_*.py' -v
       - name: Verify platform credential generation without AWS
         run: |
           python3 -m venv /tmp/retail-infra-verify
           /tmp/retail-infra-verify/bin/pip install --require-hashes -r scripts/infra/requirements.txt
           /tmp/retail-infra-verify/bin/python -B scripts/infra/crypto_smoke.py
+      - name: Verify permissions against real RabbitMQ and OpenSearch fixtures
+        run: |
+          set -euo pipefail
+          python3 -m venv /tmp/retail-permissions
+          /tmp/retail-permissions/bin/pip install --require-hashes -r scripts/infra/requirements-permissions.txt
+          PERMISSIONS_FIXTURE_ADMIN_PASSWORD="FixtureAa9!$(openssl rand -hex 24)"
+          export PERMISSIONS_FIXTURE_ADMIN_PASSWORD
+          sudo sysctl -w vm.max_map_count=262144
+          trap 'docker compose -f scripts/infra/permissions-fixtures.yml down --volumes' EXIT
+          docker compose -f scripts/infra/permissions-fixtures.yml up --detach --wait --wait-timeout 300
+          /tmp/retail-permissions/bin/python -B scripts/infra/permissions_smoke.py --prove-legacy
 
   plan:
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.operation == 'plan'

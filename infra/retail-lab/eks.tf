@@ -96,7 +96,15 @@ resource "aws_eks_node_group" "role" {
     "k8s.io/cluster-autoscaler/${local.name}" = "owned"
   }
   lifecycle { ignore_changes = [scaling_config[0].desired_size] }
-  depends_on = [aws_iam_role_policy_attachment.nodes, aws_eks_addon.cni]
+  # Private workers need the complete NAT route before their first bootstrap.
+  depends_on = [
+    aws_iam_role_policy_attachment.nodes,
+    aws_eks_addon.cni,
+    aws_nat_gateway.lab,
+    aws_route_table_association.public,
+    aws_route_table_association.app,
+    aws_vpc_endpoint.s3,
+  ]
 }
 resource "aws_eks_addon" "cni" {
   cluster_name  = aws_eks_cluster.retail.name

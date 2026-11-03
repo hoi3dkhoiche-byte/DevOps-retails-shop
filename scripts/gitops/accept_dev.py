@@ -89,14 +89,30 @@ def inspect_runtime(context, release, resolved):
     return evidence
 
 
+def service_http_port(context, name):
+    service = parse_json(run(kubectl(context, "get", "service/" + name, "-o", "json")))
+    ports = service.get("spec", {}).get("ports")
+    require(isinstance(ports, list) and ports and all(isinstance(port, dict) for port in ports),
+            "Service has no port definitions: " + name)
+    named = [port for port in ports if port.get("name") == "http"]
+    candidates = named if named else [port for port in ports if port.get("protocol", "TCP") == "TCP"]
+    require(len(candidates) == 1 and candidates[0].get("protocol", "TCP") == "TCP",
+            "Service has no unambiguous TCP HTTP port: " + name)
+    port = candidates[0].get("port")
+    require(type(port) is int and 1 <= port <= 65535, "Service has an invalid HTTP port: " + name)
+    return port
+
+
 @contextmanager
 def forward(context, service):
+    name = "ui-active" if service == "ui" else NAMES[service]
+    remote_port = service_http_port(context, name)
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         port = listener.getsockname()[1]
-    name = "ui-active" if service == "ui" else NAMES[service]
     with tempfile.TemporaryFile() as log:
-        process = subprocess.Popen(kubectl(context, "port-forward", "--address", "127.0.0.1", "service/" + name, str(port) + ":80"),
+        process = subprocess.Popen(kubectl(context, "port-forward", "--address", "127.0.0.1", "service/" + name,
+                                          str(port) + ":" + str(remote_port)),
                                    stdout=log, stderr=subprocess.STDOUT)
         try:
             deadline = time.monotonic() + 30

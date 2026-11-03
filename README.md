@@ -2,6 +2,8 @@
 
 Kiến trúc triển khai dùng một EKS tại Singapore, ba node group management/dev/prod và hai namespace `retail-dev`, `retail-prod`.
 
+[Bản đối chiếu kiến trúc hiện hành](docs/INFRASTRUCTURE_REVIEW.md) ghi rõ thành phần đang dùng và các khác biệt với ảnh `architecture.platform.png`/DOCX cũ. OpenSearch được giữ riêng theo quyết định đã chốt sau bản thiết kế.
+
 | Thành phần | Cấu hình |
 | --- | --- |
 | Catalog, Cart, Orders | Một RDS MySQL 8.4.11; database/user riêng theo service và môi trường |
@@ -19,7 +21,7 @@ Kiến trúc triển khai dùng một EKS tại Singapore, ba node group managem
 - [`.github/workflows/ci.yml`](.github/workflows/ci.yml): CI ứng dụng. [`docs/CI.md`](retail-store-sample-app/docs/CI.md) mô tả gate và artifact.
 - [`infra/retail-lab`](infra/retail-lab): Terraform cho kiến trúc mới. Các module trong `retail-store-sample-app/terraform` là mẫu upstream, không phải entrypoint của lab mới.
 - [`scripts/infra/README.md`](scripts/infra/README.md): preflight, plan/apply và bootstrap database/secret từ trong VPC.
-- [`gitops/README.md`](gitops/README.md): bộ seed cho repo GitOps, phiên bản platform đã khóa và thứ tự bootstrap.
+- [Repo GitOps](https://github.com/hoi3dkhoiche-byte/DevOps-retails-shop-gitops): cấu hình triển khai hiện hành, phiên bản platform đã khóa và hướng dẫn bootstrap. Thư mục [`gitops/`](gitops/) ở repo source là seed ban đầu.
 - [`scripts/gitops/README.md`](scripts/gitops/README.md): tự tạo PR image và nghiệm thu/promote dev → prod.
 
 ## Trước khi triển khai
@@ -28,7 +30,7 @@ Kiến trúc triển khai dùng một EKS tại Singapore, ba node group managem
 
 Terraform chạy theo hai bước riêng: tạo plan, xem diff và SHA256, sau đó mới chạy apply với plan đã xem. Nếu đang có hạ tầng/state hoặc Helm release cũ, cần kiểm kê và chuyển quyền quản lý theo hướng dẫn trước khi áp dụng; không xóa resource cũ để ép Argo CD tạo lại.
 
-Chuẩn bị và khởi tạo repo GitOps bằng nội dung thư mục `gitops/`. Sau đó đặt `GITOPS_TOKEN` và bật Variable `GITOPS_ENABLED=true` trong repo source. CI ứng dụng vẫn chạy khi chưa bật bước GitOps.
+Repo GitOps đã được khởi tạo. Clone repo đó và làm theo README của nó để nhập output Terraform thật, kích hoạt cấu hình và bootstrap ESO/Argo CD. Đặt `GITOPS_TOKEN` và bật Variable `GITOPS_ENABLED=true` trong repo source để CI tự tạo PR cập nhật digest. CI ứng dụng vẫn chạy khi chưa bật bước GitOps.
 
 Các giá trị `REPLACE_*` và IP tài liệu trong file ví dụ phải được thay bằng giá trị thực. Script chuẩn bị GitOps từ chối placeholder và IP quản trị không hợp lệ. Việc push source không tự chạy Terraform apply hay bootstrap AWS.
 

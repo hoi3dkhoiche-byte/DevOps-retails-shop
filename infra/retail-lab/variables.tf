@@ -56,6 +56,12 @@ variable "mysql_multi_az" {
   default = false
 }
 
+variable "create_opensearch_service_linked_role" {
+  description = "Create the account-wide OpenSearch service-linked role only for a fresh account. False reuses an existing OpenSearch or legacy Elasticsearch role; import before enabling for an existing role."
+  type        = bool
+  default     = false
+}
+
 variable "github_oidc_provider_arn" {
   description = "Existing account-wide GitHub OIDC provider ARN, created once by the administrator."
   type        = string

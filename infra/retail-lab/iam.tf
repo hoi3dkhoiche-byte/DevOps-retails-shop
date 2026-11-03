@@ -1,6 +1,27 @@
 data "tls_certificate" "eks" {
   url = aws_eks_cluster.retail.identity[0].oidc[0].issuer
 }
+
+# The role is shared by every OpenSearch VPC domain in the account. Reuse an
+# existing role by default, including the legacy Elasticsearch role AWS reuses.
+data "aws_iam_roles" "opensearch" {
+  count       = var.create_opensearch_service_linked_role ? 0 : 1
+  name_regex  = "^AWSServiceRoleForAmazon(OpenSearch|Elasticsearch)Service$"
+  path_prefix = "/aws-service-role/"
+}
+
+resource "aws_iam_service_linked_role" "opensearch" {
+  count            = var.create_opensearch_service_linked_role ? 1 : 0
+  aws_service_name = "opensearchservice.amazonaws.com"
+  lifecycle { prevent_destroy = true }
+}
+
+locals {
+  opensearch_service_linked_role_arns = [
+    "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/aws-service-role/opensearchservice.amazonaws.com/AWSServiceRoleForAmazonOpenSearchService",
+    "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/aws-service-role/es.amazonaws.com/AWSServiceRoleForAmazonElasticsearchService",
+  ]
+}
 resource "aws_iam_openid_connect_provider" "eks" {
   url             = aws_eks_cluster.retail.identity[0].oidc[0].issuer
   client_id_list  = ["sts.amazonaws.com"]

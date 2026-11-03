@@ -75,6 +75,17 @@ resource "aws_route_table_association" "data" {
   route_table_id = aws_route_table.data.id
 }
 
+# Loki, Velero and regional ECR layer downloads reach S3 without the NAT.
+# IAM and bucket policies still authorize requests; the service-default endpoint
+# policy also permits AWS-owned layer buckets needed by ECR image pulls.
+resource "aws_vpc_endpoint" "s3" {
+  vpc_id            = aws_vpc.retail.id
+  service_name      = "com.amazonaws.ap-southeast-1.s3"
+  vpc_endpoint_type = "Gateway"
+  route_table_ids   = [aws_route_table.app.id]
+  tags              = { Name = "retail-s3" }
+}
+
 resource "aws_security_group" "nodes" {
   name_prefix = "retail-nodes-"
   vpc_id      = aws_vpc.retail.id

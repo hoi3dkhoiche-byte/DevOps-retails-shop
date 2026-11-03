@@ -19,6 +19,7 @@ import urllib.request
 REGION = "ap-southeast-1"
 ENVIRONMENTS = ("dev", "prod")
 SERVICES = ("catalog", "cart", "orders")
+ORDERS_RESOURCES = r"^orders\.(events|dlx|events\.v2|events\.dlq)$"
 PLATFORM = {
     "mq_admin": ("/retail/platform/mq/admin", "retailadmin"),
     "search_admin": ("/retail/platform/search/admin", "retailadmin"),
@@ -121,7 +122,9 @@ def rabbit_accounts(client, endpoint, admin, put=request_json):
         put(management, "/api/vhosts/" + quote(vhost, safe=""), admin, {})
         put(management, "/api/users/" + quote(username, safe=""), admin, {"password": value["password"], "tags": ""})
         put(management, "/api/permissions/" + quote(vhost, safe="") + "/" + quote(username, safe=""), admin,
-            {"configure": r"^orders\.(events(\.v2|\.dlq)?|dlx)$", "write": r"^orders\.(events|dlx)$", "read": r"^orders\.events\.(v2|dlq)$"})
+            # queue.bind needs write on the queue and read on the exchange.
+            # Publishing/consuming and DLX declaration also use these four names.
+            {"configure": ORDERS_RESOURCES, "write": ORDERS_RESOURCES, "read": ORDERS_RESOURCES})
 
 
 def search_accounts(client, endpoint, admin, put=request_json):
@@ -130,7 +133,9 @@ def search_accounts(client, endpoint, admin, put=request_json):
         username, role = "catalog-" + environment, "retail-catalog-" + environment
         value, _ = credentials(client, f"/retail/{environment}/catalog/opensearch", username, extra={"endpoint": endpoint})
         put(endpoint, "/_plugins/_security/api/roles/" + role, admin, {
-            "cluster_permissions": ["cluster:monitor/main", "cluster:monitor/health"],
+            # The coordinating bulk action is checked at cluster level as well
+            # as against the environment-scoped index permissions below.
+            "cluster_permissions": ["cluster:monitor/main", "cluster:monitor/health", "indices:data/write/bulk*"],
             "index_permissions": [{"index_patterns": ["products-" + environment], "allowed_actions": ["indices_all"]}], "tenant_permissions": []})
         put(endpoint, "/_plugins/_security/api/internalusers/" + username, admin, {"password": value["password"], "backend_roles": []})
         put(endpoint, "/_plugins/_security/api/rolesmapping/" + role, admin, {"users": [username], "backend_roles": [], "hosts": []})

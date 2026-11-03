@@ -1,5 +1,9 @@
 # Retail GitOps seed
 
+The maintained deployment repository is now [DevOps-retails-shop-gitops](https://github.com/hoi3dkhoiche-byte/DevOps-retails-shop-gitops). This directory is the original seed; use the standalone repository's current README, activation checks and bootstrap scripts for deployment. Copying this seed over the published repository would discard later fixes.
+
+## Original seed instructions (historical)
+
 Copy the **contents of this directory** into `hoi3dkhoiche-byte/DevOps-retails-shop-gitops` on `main` after preparing its account-specific values. This directory is the reviewable seed; creating it does not publish the GitOps repository or deploy AWS resources.
 
 The target is one EKS 1.36 cluster in Singapore, namespaces `retail-dev` and `retail-prod`, one shared RDS MySQL 8.4 server with separate database/users for Catalog, Cart and Orders in each environment, shared Redis with distinct ACLs/prefixes, OpenSearch with separate environment indices, and private multi-AZ RabbitMQ. Terraform manages the AWS resources and EKS managed add-ons. Argo CD manages platform charts and application resources.

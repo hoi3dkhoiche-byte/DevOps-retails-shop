@@ -19,3 +19,10 @@ platform_secret_arns = {
 }
 domain         = ""
 hosted_zone_id = ""
+
+# Keep false when OpenSearch or the legacy Elasticsearch service-linked role
+# already exists in this account. A fresh account can set true to create it.
+# To manage an existing modern role instead of reusing it, import its ARN into
+# aws_iam_service_linked_role.opensearch[0] before the first apply with true.
+# This shared account role is protected from terraform destroy.
+create_opensearch_service_linked_role = false

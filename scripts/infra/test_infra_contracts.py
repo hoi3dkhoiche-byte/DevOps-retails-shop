@@ -2,6 +2,7 @@ import copy
 from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -71,7 +72,7 @@ class RegionalPreflightTests(unittest.TestCase):
             "platform_secret_arns": {"mq_admin": "arn:secret"}}
 
     def aws(self, service, operation, *args):
-        if operation == "describe-cluster-versions": return {"clusterVersions": [{"clusterVersion": "1.36", "status": "STANDARD_SUPPORT"}]}
+        if operation == "describe-cluster-versions": return {"clusterVersions": [{"clusterVersion": "1.36", "status": "standard-support", "versionStatus": "STANDARD_SUPPORT"}]}
         if operation == "describe-addon-versions":
             name = args[args.index("--addon-name") + 1]
             key = next(key for key, value in preflight.ADDONS.items() if value == name)
@@ -82,6 +83,7 @@ class RegionalPreflightTests(unittest.TestCase):
         if operation == "describe-broker-engine-types": return {"brokerEngineTypes": [{"engineVersions": [{"name": "4.2"}]}]}
         if operation == "describe-broker-instance-options": return {"brokerInstanceOptions": [{"supportedDeploymentModes": ["CLUSTER_MULTI_AZ"]}]}
         if operation == "list-versions": return {"Versions": ["OpenSearch_3.3"]}
+        if operation == "get-role": return {"Role": search_role()}
         if operation == "describe-secret": return {"VersionIdsToStages": {"version-id": ["AWSCURRENT"]}}
         if operation == "head-bucket": return {}
         raise AssertionError(operation)
@@ -103,6 +105,73 @@ class RegionalPreflightTests(unittest.TestCase):
         def missing(service, operation, *args):
             return {"VersionIdsToStages": {}} if operation == "describe-secret" else original(service, operation, *args)
         with patch.object(preflight, "aws", side_effect=missing), self.assertRaises(ValueError): preflight.check(self.config)
+
+    def test_current_and_legacy_eks_api_status_fields_are_supported(self):
+        for fields in ({"versionStatus": "STANDARD_SUPPORT"}, {"status": "standard-support"}):
+            def response(service, operation, *args):
+                if operation == "describe-cluster-versions":
+                    return {"clusterVersions": [{"clusterVersion": "1.36", **fields}]}
+                return self.aws(service, operation, *args)
+            with self.subTest(fields=fields), patch.object(preflight, "aws", side_effect=response):
+                preflight.check(self.config)
+
+    def test_extended_unknown_and_conflicting_eks_status_are_rejected(self):
+        for fields in ({"versionStatus": "EXTENDED_SUPPORT", "status": "standard-support"},
+                       {"versionStatus": "UNSUPPORTED"}, {"status": "extended-support"}, {},
+                       {"versionStatus": "NEW_UNKNOWN_STATUS"}):
+            with self.subTest(fields=fields), patch.object(preflight, "aws", return_value={
+                    "clusterVersions": [{"clusterVersion": "1.36", **fields}]}), self.assertRaises(ValueError):
+                preflight.check(self.config)
+
+
+def search_role(name="AWSServiceRoleForAmazonOpenSearchService"):
+    service = preflight.SEARCH_SERVICE_ROLES[name]
+    path = "/aws-service-role/" + service + "/"
+    return {"RoleName": name, "Path": path, "Arn": "arn:aws:iam::111122223333:role" + path + name,
+            "AssumeRolePolicyDocument": {"Statement": [{"Effect": "Allow", "Principal": {"Service": service},
+                                                         "Action": "sts:AssumeRole"}]}}
+
+
+class SearchServiceRoleTests(unittest.TestCase):
+    @staticmethod
+    def absent(*args):
+        raise subprocess.CalledProcessError(254, ["aws", "iam", "get-role"], stderr="An error occurred (NoSuchEntity)")
+
+    def test_existing_role_is_reused_in_both_modes(self):
+        for create in (False, True):
+            with self.subTest(create=create), patch.object(preflight, "aws", return_value={"Role": search_role()}):
+                preflight.check_search_service_role({"create_opensearch_service_linked_role": create})
+
+    def test_legacy_service_linked_role_is_reused(self):
+        def response(service, operation, *args):
+            if args[-1] == "AWSServiceRoleForAmazonOpenSearchService":
+                return self.absent()
+            return {"Role": search_role("AWSServiceRoleForAmazonElasticsearchService")}
+        with patch.object(preflight, "aws", side_effect=response):
+            preflight.check_search_service_role({})
+
+    def test_missing_role_requires_explicit_creation_mode(self):
+        with patch.object(preflight, "aws", side_effect=self.absent):
+            with self.assertRaisesRegex(ValueError, "create_opensearch_service_linked_role=true"):
+                preflight.check_search_service_role({})
+            preflight.check_search_service_role({"create_opensearch_service_linked_role": True})
+
+    def test_access_denied_is_not_treated_as_missing_role(self):
+        failure = subprocess.CalledProcessError(254, ["aws"], stderr="An error occurred (AccessDenied)")
+        with patch.object(preflight, "aws", side_effect=failure), self.assertRaises(subprocess.CalledProcessError):
+            preflight.check_search_service_role({"create_opensearch_service_linked_role": True})
+
+    def test_wrong_path_trust_and_account_are_rejected(self):
+        roles = [dict(search_role(), Path="/"), dict(search_role(), AssumeRolePolicyDocument={}),
+                 dict(search_role(), Arn=search_role()["Arn"].replace("111122223333", "999988887777"))]
+        for role in roles:
+            with self.subTest(role=role), patch.object(preflight, "aws", return_value={"Role": role}), self.assertRaises(ValueError):
+                preflight.check_search_service_role({"admin_role_arn": "arn:aws:iam::111122223333:role/admin"})
+
+    def test_creation_mode_requires_a_boolean(self):
+        with patch.object(preflight, "aws") as api, self.assertRaises(ValueError):
+            preflight.check_search_service_role({"create_opensearch_service_linked_role": "false"})
+        api.assert_not_called()
 
 
 if __name__ == "__main__":
