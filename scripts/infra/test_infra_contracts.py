@@ -16,6 +16,7 @@ def valid_config():
     return {"admin_cidrs": ["8.8.8.8/32"], "admin_role_arn": "arn:aws:iam::" + account + ":role/retail-admin",
             "github_oidc_provider_arn": "arn:aws:iam::" + account + ":oidc-provider/token.actions.githubusercontent.com",
             "terraform_policy_arn": "arn:aws:iam::" + account + ":policy/retail-infra",
+            "terraform_workload_boundary_arn": "arn:aws:iam::" + account + ":policy/retail-lab-workload-boundary",
             "addon_versions": {"vpc_cni": "v1.21.1-eksbuild.1", "coredns": "v1.13.0-eksbuild.1",
                                "kube_proxy": "v1.36.0-eksbuild.1", "ebs_csi": "v1.51.0-eksbuild.1"},
             "platform_secret_arns": {key: "arn:aws:secretsmanager:ap-southeast-1:" + account + ":secret:/retail/platform/" + key + "-ABC123"
@@ -111,9 +112,13 @@ class RegionalPreflightTests(unittest.TestCase):
         if operation == "list-versions": return {"Versions": ["OpenSearch_3.3"]}
         if operation == "describe-instance-type-limits": return search_limits()
         if operation == "get-role":
+            if args[-1] in preflight.delegated_role_names():
+                raise subprocess.CalledProcessError(254, ["aws"], stderr="An error occurred (NoSuchEntity)")
             return {"Role": {"Arn": self.config["admin_role_arn"]}} if args[-1] == "retail-admin" else {"Role": search_role()}
         if operation == "get-open-id-connect-provider": return {"Url": "token.actions.githubusercontent.com", "ClientIDList": ["sts.amazonaws.com"]}
-        if operation == "get-policy": return {"Policy": {"Arn": args[-1], "IsAttachable": True}}
+        if operation == "get-policy": return {"Policy": {"Arn": args[-1], "IsAttachable": True, "DefaultVersionId": "v1"}}
+        if operation == "get-policy-version": return {"PolicyVersion": {"IsDefaultVersion": True,
+            "Document": preflight.render_boundary("111122223333", preflight.REGION)}}
         if operation == "describe-secret": return {"VersionIdsToStages": {"version-id": ["AWSCURRENT"]}}
         raise AssertionError(operation)
 
@@ -191,6 +196,15 @@ class RegionalPreflightTests(unittest.TestCase):
 
 
 class InputPreflightTests(unittest.TestCase):
+    def test_missing_unreviewed_or_cross_account_boundary_stops_before_aws(self):
+        for arn in (None, "arn:aws:iam::111122223333:policy/other-boundary",
+                    "arn:aws:iam::999988887777:policy/retail-lab-workload-boundary"):
+            config = valid_config()
+            config["terraform_workload_boundary_arn"] = arn
+            with self.subTest(arn=arn), patch.object(preflight, "aws") as api, self.assertRaises(ValueError):
+                preflight.check(config)
+            api.assert_not_called()
+
     def test_real_shaped_inputs_are_accepted_without_aws_calls(self):
         with patch.object(preflight, "aws") as api:
             self.assertEqual(preflight.validate_inputs(valid_config()), "111122223333")
@@ -259,6 +273,7 @@ class StateBucketPreflightTests(unittest.TestCase):
     def test_bucket_metadata_checks_are_read_only_and_owner_bound(self):
         with patch.object(preflight, "aws", side_effect=state_response) as api:
             preflight.check_state_bucket("111122223333")
+
         for call in api.call_args_list:
             self.assertEqual(call.args[0], "s3api")
             self.assertIn("--expected-bucket-owner", call.args)
@@ -287,6 +302,73 @@ class StateBucketPreflightTests(unittest.TestCase):
         error = subprocess.CalledProcessError(254, ["aws"], stderr="An error occurred (AccessDenied)")
         with patch.object(preflight, "aws", side_effect=error), self.assertRaisesRegex(ValueError, "ownership"):
             preflight.check_state_bucket("111122223333")
+
+
+class WorkloadBoundaryPreflightTests(unittest.TestCase):
+    def test_existing_roles_require_admin_boundary_migration_and_missing_roles_are_allowed(self):
+        config = valid_config()
+        arn = config["terraform_workload_boundary_arn"]
+        names = preflight.delegated_role_names()
+        def bounded(service, operation, *args):
+            return {"Role": {"Arn": "arn:aws:iam::111122223333:role/" + args[-1],
+                             "PermissionsBoundary": {"PermissionsBoundaryArn": arn}}}
+        with patch.object(preflight, "aws", side_effect=bounded) as api:
+            preflight.check_existing_role_boundaries(config)
+        self.assertEqual(len(api.call_args_list), len(names))
+        for role in ({"Arn": "arn:aws:iam::111122223333:role/" + names[0]},
+                     {"Arn": "arn:aws:iam::111122223333:role/" + names[0],
+                      "PermissionsBoundary": {"PermissionsBoundaryArn": arn + "-wrong"}}):
+            with patch.object(preflight, "aws", return_value={"Role": role}), self.assertRaisesRegex(ValueError, "admin must reconcile"):
+                preflight.check_existing_role_boundaries(config)
+        with patch.object(preflight, "aws", side_effect=subprocess.CalledProcessError(254, ["aws"], stderr="(NoSuchEntity)")):
+            preflight.check_existing_role_boundaries(config)
+        with patch.object(preflight, "aws", side_effect=subprocess.CalledProcessError(254, ["aws"], stderr="(AccessDenied)")), \
+                self.assertRaises(subprocess.CalledProcessError):
+            preflight.check_existing_role_boundaries(config)
+
+    def test_saved_plan_boundary_recheck_reads_actual_identity_before_the_policy(self):
+        import contextlib
+        import io
+        with patch("sys.argv", ["preflight.py", "--boundary-account-id", "111122223333"]), \
+                patch.object(preflight, "aws", return_value={"Account": "111122223333"}) as api, \
+                patch.object(preflight, "check_workload_boundary") as boundary, \
+                patch.object(preflight, "check_existing_role_boundaries") as roles, contextlib.redirect_stdout(io.StringIO()):
+            preflight.main()
+        api.assert_called_once_with("sts", "get-caller-identity")
+        self.assertEqual(boundary.call_args.args[0]["terraform_workload_boundary_arn"],
+                         "arn:aws:iam::111122223333:policy/retail-lab-workload-boundary")
+        roles.assert_called_once_with(boundary.call_args.args[0])
+
+    def test_saved_plan_boundary_recheck_fails_before_policy_on_wrong_identity(self):
+        with patch("sys.argv", ["preflight.py", "--boundary-account-id", "111122223333"]), \
+                patch.object(preflight, "aws", return_value={"Account": "999988887777"}), \
+                patch.object(preflight, "check_workload_boundary") as boundary, self.assertRaises(ValueError):
+            preflight.main()
+        boundary.assert_not_called()
+
+    def test_exact_default_policy_is_checked_with_read_only_apis(self):
+        from urllib.parse import quote
+        config = valid_config()
+        arn = config["terraform_workload_boundary_arn"]
+        document = preflight.render_boundary("111122223333", preflight.REGION)
+        for serialized in (document, quote(json.dumps(document))):
+            with self.subTest(serialized=isinstance(serialized, str)), patch.object(preflight, "aws", side_effect=[
+                    {"Policy": {"Arn": arn, "IsAttachable": True, "DefaultVersionId": "v12"}},
+                    {"PolicyVersion": {"Document": serialized, "IsDefaultVersion": True}}]) as api:
+                preflight.check_workload_boundary(config)
+            self.assertEqual([call.args[1] for call in api.call_args_list], ["get-policy", "get-policy-version"])
+            self.assertEqual(api.call_args_list[-1].args[-1], "v12")
+
+    def test_tampered_default_policy_and_stale_or_missing_versions_fail(self):
+        config = valid_config()
+        arn = config["terraform_workload_boundary_arn"]
+        document = preflight.render_boundary("111122223333", preflight.REGION)
+        for policy in ({"Document": {"Version": "2012-10-17", "Statement": []}, "IsDefaultVersion": True},
+                       {"Document": document, "IsDefaultVersion": False}, {"IsDefaultVersion": True}):
+            with self.subTest(policy=policy), patch.object(preflight, "aws", side_effect=[
+                    {"Policy": {"Arn": arn, "IsAttachable": True, "DefaultVersionId": "v2"}},
+                    {"PolicyVersion": policy}]), self.assertRaises(ValueError):
+                preflight.check_workload_boundary(config)
 
 
 class WorkerOfferingTests(unittest.TestCase):

@@ -1,4 +1,9 @@
 mock_provider "aws" {
+  mock_data "aws_iam_policy" {
+    defaults = {
+      policy = replace(replace(file("policies/workload-boundary.json"), "__AWS_ACCOUNT_ID__", "111122223333"), "__AWS_REGION__", "ap-southeast-1")
+    }
+  }
   mock_data "aws_caller_identity" {
     defaults = { account_id = "111122223333" }
   }
@@ -35,10 +40,11 @@ mock_provider "tls" {
 }
 
 variables {
-  admin_cidrs              = ["8.8.8.8/32"]
-  admin_role_arn           = "arn:aws:iam::111122223333:role/offline-admin"
-  github_oidc_provider_arn = "arn:aws:iam::111122223333:oidc-provider/token.actions.githubusercontent.com"
-  terraform_policy_arn     = "arn:aws:iam::111122223333:policy/offline-infra"
+  admin_cidrs                     = ["8.8.8.8/32"]
+  admin_role_arn                  = "arn:aws:iam::111122223333:role/offline-admin"
+  github_oidc_provider_arn        = "arn:aws:iam::111122223333:oidc-provider/token.actions.githubusercontent.com"
+  terraform_workload_boundary_arn = "arn:aws:iam::111122223333:policy/retail-lab-workload-boundary"
+  terraform_policy_arn            = "arn:aws:iam::111122223333:policy/offline-infra"
   addon_versions = {
     vpc_cni    = "v1.21.1-eksbuild.1"
     coredns    = "v1.13.0-eksbuild.1"

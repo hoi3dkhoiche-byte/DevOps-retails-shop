@@ -7,6 +7,9 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+from urllib.parse import unquote
+
+from render_terraform_policy import boundary_checksum, delegated_role_names, render_boundary
 
 REGION = "ap-southeast-1"
 ADDONS = {"vpc_cni": "vpc-cni", "coredns": "coredns", "kube_proxy": "kube-proxy", "ebs_csi": "aws-ebs-csi-driver"}
@@ -77,6 +80,9 @@ def validate_inputs(config):
     if not isinstance(policy, str) or re.fullmatch(r"arn:aws:iam::" + account + r":policy/[A-Za-z0-9+=,.@_/-]+", policy) is None:
         raise ValueError("Terraform policy ARN must belong to the administration account")
     additional = config.get("terraform_additional_policy_arns", [])
+    expected_boundary = "arn:aws:iam::" + account + ":policy/retail-lab-workload-boundary"
+    if config.get("terraform_workload_boundary_arn") != expected_boundary:
+        raise ValueError("Supply the fixed admin-owned terraform_workload_boundary_arn in this account")
     if (not isinstance(additional, list) or len(additional) > 9
             or any(not isinstance(value, str) or re.fullmatch(r"arn:aws:iam::" + account + r":policy/[A-Za-z0-9+=,.@_/-]+", value) is None
                    or re.search(r"REPLACE|CHANGE_ME|YOUR_", value, re.IGNORECASE) for value in additional)
@@ -268,8 +274,45 @@ def check_iam_prerequisites(config):
             policy = aws("iam", "get-policy", "--policy-arn", arn).get("Policy", {})
             if policy.get("Arn") != arn or policy.get("IsAttachable") is not True:
                 raise ValueError("A reviewed Terraform IAM policy does not exist or cannot be attached")
+        check_workload_boundary(config)
+        check_existing_role_boundaries(config)
     except subprocess.CalledProcessError as error:
         raise ValueError("Cannot verify administration role, GitHub OIDC or Terraform policy metadata; check bootstrap and IAM read permissions") from error
+
+
+def check_workload_boundary(config):
+    """Verify the admin-owned default version, not only an attachable policy ARN."""
+    account = config["admin_role_arn"].split(":")[4]
+    arn = config["terraform_workload_boundary_arn"]
+    metadata = aws("iam", "get-policy", "--policy-arn", arn).get("Policy", {})
+    version = metadata.get("DefaultVersionId")
+    if (metadata.get("Arn") != arn or metadata.get("IsAttachable") is not True
+            or not isinstance(version, str) or re.fullmatch(r"v[1-9][0-9]*", version) is None):
+        raise ValueError("Admin-owned workload boundary metadata/default version is invalid")
+    current = aws("iam", "get-policy-version", "--policy-arn", arn, "--version-id", version).get("PolicyVersion", {})
+    document = current.get("Document")
+    if isinstance(document, str):
+        document = json.loads(unquote(document))
+    if current.get("IsDefaultVersion") is not True or not isinstance(document, dict):
+        raise ValueError("Cannot verify the workload boundary default policy document")
+    if boundary_checksum(document) != boundary_checksum(render_boundary(account, REGION)):
+        raise ValueError("Workload boundary differs from the reviewed template; reconcile it with admin before plan")
+
+
+def check_existing_role_boundaries(config):
+    """Existing roles need admin migration; never silently pass an unbounded role."""
+    expected = config["terraform_workload_boundary_arn"]
+    account = config["admin_role_arn"].split(":")[4]
+    for name in delegated_role_names():
+        try:
+            role = aws("iam", "get-role", "--role-name", name).get("Role", {})
+        except subprocess.CalledProcessError as error:
+            if "(NoSuchEntity)" in (error.stderr or ""):
+                continue
+            raise
+        if (role.get("Arn") != "arn:aws:iam::" + account + ":role/" + name
+                or role.get("PermissionsBoundary", {}).get("PermissionsBoundaryArn") != expected):
+            raise ValueError("An existing delegated role is unbounded or unexpected; admin must reconcile its boundary before CI")
 
 
 def check(config):
@@ -326,8 +369,22 @@ def check(config):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--tfvars", type=Path, required=True, help="JSON tfvars containing ARNs and configuration only")
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--tfvars", type=Path, help="JSON tfvars containing ARNs and configuration only")
+    mode.add_argument("--boundary-account-id", help="Recheck the live admin boundary immediately before applying a saved plan")
     args = parser.parse_args()
+    if args.boundary_account_id:
+        account = args.boundary_account_id
+        if re.fullmatch(r"[0-9]{12}", account) is None or account in {"000000000000", "123456789012"}:
+            raise ValueError("Supply the real account recorded in reviewed plan metadata")
+        if aws("sts", "get-caller-identity").get("Account") != account:
+            raise ValueError("AWS caller account differs from the reviewed plan account")
+        config = {"admin_role_arn": "arn:aws:iam::" + account + ":role/retail-lab-terraform",
+                  "terraform_workload_boundary_arn": "arn:aws:iam::" + account + ":policy/retail-lab-workload-boundary"}
+        check_workload_boundary(config)
+        check_existing_role_boundaries(config)
+        print("Reviewed account and live admin-owned workload boundary passed before saved-plan apply.")
+        return
     check(json.loads(args.tfvars.read_text(encoding="utf-8-sig")))
     print("Account, state bucket metadata, worker AZ offerings and regional EKS/add-on/backend prerequisites passed.")
     print("Native state-lock write/delete permissions are verified when Terraform plan acquires the .tflock; metadata checks do not prove them.")

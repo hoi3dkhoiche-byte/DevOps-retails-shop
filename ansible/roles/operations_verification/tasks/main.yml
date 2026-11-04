@@ -1,0 +1,47 @@
+---
+- name: Validate operational acceptance switches and controller mode
+  ansible.builtin.assert:
+    that:
+      - not ansible_check_mode
+      - retail_ops_require_alerting is boolean
+      - retail_ops_send_test_alert is boolean
+      - not retail_ops_send_test_alert or retail_ops_operation_id | length > 0
+    fail_msg: Run normally to collect live evidence; sending a test alert needs an explicit operation ID and boolean switch.
+
+- name: Inspect live monitoring APIs and backup archive content
+  ansible.builtin.command:
+    argv: >-
+      {{ [ansible_playbook_python, retail_source_dir ~ '/scripts/infra/ops_acceptance.py',
+          '--terraform-output', retail_terraform_output, '--terraform-metadata', retail_terraform_metadata,
+          '--gitops-dir', retail_gitops_dir, '--account-id', retail_account_id,
+          '--context', retail_kube_context, '--kubeconfig', retail_kubeconfig,
+          '--report', retail_ops_report,
+          '--max-backup-age-hours', retail_ops_max_backup_age_hours | string]
+         + (['--require-alerting'] if retail_ops_require_alerting else [])
+         + (['--send-test-alert', '--operation-id', retail_ops_operation_id] if retail_ops_send_test_alert else []) }}
+  environment: "{{ retail_aws_environment }}"
+  register: operations_verification_command
+  changed_when: (operations_verification_command.stdout | from_json).changed | default(false) | bool
+  failed_when: false
+  no_log: true
+
+- name: Decode the safe operational report
+  ansible.builtin.set_fact:
+    operations_verification_report: "{{ operations_verification_command.stdout | from_json }}"
+
+- name: Show operational evidence scope
+  ansible.builtin.debug:
+    msg:
+      status: "{{ operations_verification_report.status }}"
+      report: "{{ retail_ops_report }}"
+      error: "{{ operations_verification_report.error | default('none') }}"
+      notification_delivery: "{{ operations_verification_report.notification_delivery | default('not_tested') }}"
+
+- name: Require complete read-only evidence and never invent notification receipt
+  ansible.builtin.assert:
+    that:
+      - operations_verification_command.rc == 0
+      - operations_verification_report.status == 'success'
+    fail_msg: >-
+      Operational acceptance failed or a test alert still needs operator confirmation.
+      Sending to Alertmanager does not prove receipt; inspect {{ retail_ops_report }} and record real delivery evidence.

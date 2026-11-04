@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -27,11 +28,34 @@ OUTPUT_KEYS = ("account_id", "cluster_name", "cluster_endpoint", "workload_roles
                "mysql_master_secret_arn", "backend_endpoints", "platform_secret_arns")
 
 
-def resources(outputs, name, timeout=DEFAULT_TIMEOUT):
+def rotation_arguments(rotation):
+    require(set(rotation) == {'environment', 'service', 'backend', 'operation_id', 'ack_maintenance', 'rollback',
+                              'finalize', 'ack_consumers_reloaded'},
+            'Invalid credential rotation parameters')
+    require(rotation['environment'] in ('dev', 'prod') and rotation['service'] in ('catalog', 'cart', 'orders', 'checkout'),
+            'Select one supported service and environment for rotation')
+    require((rotation['service'], rotation['backend']) in {
+        ('catalog', 'mysql'), ('cart', 'mysql'), ('orders', 'mysql'),
+        ('orders', 'rabbitmq'), ('catalog', 'opensearch'), ('checkout', 'redis')},
+        'This service/backend pair cannot be rotated')
+    require(isinstance(rotation['operation_id'], str) and
+            re.fullmatch(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', rotation['operation_id']) is not None,
+            'Rotation operation ID must be a lowercase UUID')
+    require(all(type(rotation[key]) is bool for key in ('ack_maintenance', 'rollback', 'finalize', 'ack_consumers_reloaded')),
+            'Rotation switches must be booleans')
+    require(not (rotation['finalize'] and rotation['rollback']), 'Finalize and rollback cannot run together')
+    require(not rotation['finalize'] or rotation['ack_consumers_reloaded'], 'Finalize requires explicit confirmation that consumers reloaded')
+    return ['--environment', rotation['environment'], '--service', rotation['service'],
+            '--backend', rotation['backend'], '--operation-id', rotation['operation_id']] + (
+            ['--ack-maintenance'] if rotation['ack_maintenance'] else []) + (['--rollback'] if rotation['rollback'] else []) + (
+            ['--finalize'] if rotation['finalize'] else []) + (['--ack-consumers-reloaded'] if rotation['ack_consumers_reloaded'] else [])
+
+
+def resources(outputs, name, timeout=DEFAULT_TIMEOUT, rotation=None):
     role = output_value(outputs, "workload_roles")["bootstrap"]
     if not re.fullmatch(r"arn:aws:iam::[0-9]{12}:role/.+", role):
         raise ValueError("Terraform output has no valid backend-bootstrap IAM role")
-    return {"apiVersion": "v1", "kind": "List", "items": [
+    manifest = {"apiVersion": "v1", "kind": "List", "items": [
         {"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": "retail-ops"}},
         {"apiVersion": "v1", "kind": "ServiceAccount", "metadata": {"name": "backend-bootstrap", "namespace": "retail-ops", "annotations": {"eks.amazonaws.com/role-arn": role}}},
         {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": name, "namespace": "retail-ops"}, "data": {
@@ -59,6 +83,20 @@ def resources(outputs, name, timeout=DEFAULT_TIMEOUT):
             }},
         }},
     ]}
+    if rotation is not None:
+        arguments = rotation_arguments(rotation)
+        config = next(item for item in manifest['items'] if item['kind'] == 'ConfigMap')
+        for filename in ('rotate_credentials.py', 'run_bootstrap.py'):
+            config['data'][filename] = (ROOT / 'scripts/infra' / filename).read_text(encoding='utf-8')
+        job = next(item for item in manifest['items'] if item['kind'] == 'Job')
+        job['metadata']['labels']['retail.aws/operation'] = 'credential-rotation'
+        container = job['spec']['template']['spec']['containers'][0]
+        container['env'].append({'name': 'RETAIL_ROTATION_JOB', 'value': name})
+        container['volumeMounts'].append({'name': 'config', 'mountPath': '/work/scripts/infra', 'readOnly': True})
+        command = ['python', '/work/scripts/infra/rotate_credentials.py', '--terraform-output',
+                   '/config/terraform-output.json', '--rds-ca', '/config/rds-ca.pem', '--execute', *arguments]
+        container['args'] = [DEPENDENCY_INSTALL_COMMAND + '; ' + shlex.join(command)]
+    return manifest
 
 
 class RunnerError(RuntimeError):
@@ -282,6 +320,29 @@ def collect_diagnostics(client, name):
                     r"Backend bootstrap failed \([A-Za-z_][A-Za-z0-9_]*\)\. Check prerequisite configuration and private connectivity\.")
         result["safe_log_lines"] = [line for line in logs.splitlines() if any(re.fullmatch(pattern, line) for pattern in patterns)]
         result["omitted_log_lines"] = len(logs.splitlines()) - len(result["safe_log_lines"])
+        rotations = []
+        for line in logs.splitlines():
+            try:
+                value = json.loads(line)
+            except (ValueError, TypeError):
+                continue
+            if not (isinstance(value, dict) and value.get('schema_version') == 1
+                    and value.get('operation') == 'credential_rotation'
+                    and value.get('environment') in ('dev', 'prod')
+                    and (value.get('service'), value.get('backend')) in {
+                        ('catalog', 'mysql'), ('cart', 'mysql'), ('orders', 'mysql'),
+                        ('orders', 'rabbitmq'), ('catalog', 'opensearch'), ('checkout', 'redis')}
+                    and isinstance(value.get('operation_id'), str)
+                    and re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}', value['operation_id'])
+                    and value.get('status') in ('planned', 'success', 'failed')
+                    and value.get('phase') in ('input', 'metadata', 'stage', 'backend', 'publish', 'complete', 'finalize', 'finalized')):
+                continue
+            safe = {key: value[key] for key in ('environment', 'service', 'backend', 'operation_id', 'status', 'phase')}
+            safe.update({key: value[key] for key in ('changed', 'backend_may_have_changed', 'old_password_retained')
+                         if type(value.get(key)) is bool})
+            rotations.append(safe)
+        if len(rotations) == 1:
+            result['rotation_result'] = rotations[0]
     except RunnerError:
         result["logs_available"] = False
     try:
@@ -315,7 +376,7 @@ def stop_owned_job(client, name):
     return client.get("job", name) is None
 
 
-def run(outputs, client, name, timeout, report):
+def run(outputs, client, name, timeout, report, rotation=None):
     report["phase"] = "target"
     validate_context(client, outputs)
     report["phase"] = "namespace"
@@ -327,7 +388,7 @@ def run(outputs, client, name, timeout, report):
     try:
         report["phase"] = "lease"
         lease.acquire()
-        manifest = resources(outputs, name, timeout)
+        manifest = resources(outputs, name, timeout, rotation=rotation)
         report["phase"] = "submit"
         for item in manifest["items"][1:]:
             if item["kind"] == "Job":
@@ -340,6 +401,13 @@ def run(outputs, client, name, timeout, report):
         wait_job(client, name, timeout)
         terminal = True
         report["diagnostics"] = collect_diagnostics(client, name)
+        if rotation is not None:
+            evidence = report['diagnostics'].get('rotation_result', {})
+            if not (evidence.get('status') == 'success'
+                    and all(evidence.get(key) == rotation[key] for key in ('environment', 'service', 'backend', 'operation_id'))
+                    and evidence.get('phase') == ('finalized' if rotation['finalize'] else 'complete')):
+                raise RunnerError('rotation_evidence_missing', 'Rotation Job completed without matching safe operation evidence')
+            report['rotation_result'] = evidence
         report["phase"] = "cleanup"
         client.call(["delete", "configmap", name, "--ignore-not-found", "--wait=true", "--timeout=20s"])
     except RunnerError:
@@ -385,9 +453,19 @@ def main(argv=None):
     parser.add_argument("--report", type=Path, help="Write a non-secret JSON operation report for automation")
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, help="Job deadline in seconds, 30 through 3600")
     parser.add_argument("--render-only", action="store_true")
+    parser.add_argument('--operation', choices=('bootstrap', 'rotate'), default='bootstrap')
+    parser.add_argument('--environment')
+    parser.add_argument('--service')
+    parser.add_argument('--backend')
+    parser.add_argument('--operation-id')
+    parser.add_argument('--execute', action='store_true', help='Submit a rotation Job; otherwise rotation is a read-only plan')
+    parser.add_argument('--ack-maintenance', action='store_true')
+    parser.add_argument('--rollback', action='store_true')
+    parser.add_argument('--finalize', action='store_true')
+    parser.add_argument('--ack-consumers-reloaded', action='store_true')
     args = parser.parse_args(argv)
     name = unique_name()
-    report = {"schema_version": 1, "operation": "backend_bootstrap", "status": "failed", "changed": False,
+    report = {"schema_version": 1, "operation": "credential_rotation" if args.operation == 'rotate' else "backend_bootstrap", "status": "failed", "changed": False,
               "job_name": name, "namespace": NAMESPACE, "job_created": False,
               "started_at": datetime.now(timezone.utc).isoformat(), "phase": "input"}
     code = 1
@@ -395,13 +473,58 @@ def main(argv=None):
         require(30 <= args.timeout <= 3600, "Job timeout must be between 30 and 3600 seconds")
         outputs = load_outputs(args.terraform_output)
         report.update(account_id=outputs["account_id"], cluster_name=outputs["cluster_name"])
+        rotation = None
+        if args.operation == 'rotate':
+            rotation = {'environment': args.environment, 'service': args.service, 'backend': args.backend,
+                        'operation_id': args.operation_id, 'ack_maintenance': args.ack_maintenance, 'rollback': args.rollback,
+                        'finalize': args.finalize, 'ack_consumers_reloaded': args.ack_consumers_reloaded}
+            arguments = rotation_arguments(rotation)
+            require(not args.execute or args.backend not in ('rabbitmq', 'opensearch') or args.ack_maintenance,
+                    'Single-password backend rotation requires --ack-maintenance')
+            report['rotation'] = rotation
+        else:
+            require(not any((args.environment, args.service, args.backend, args.operation_id,
+                             args.execute, args.ack_maintenance, args.rollback, args.finalize, args.ack_consumers_reloaded)),
+                    'Rotation options require --operation rotate')
         if args.render_only:
-            print(json.dumps(resources(outputs, name, args.timeout)))
+            print(json.dumps(resources(outputs, name, args.timeout, rotation=rotation)))
             return 0
-        client = Kubectl(args.context, args.kubeconfig)
-        run(outputs, client, name, args.timeout, report)
-        report.update(status="success", phase="complete")
-        code = 0
+        if rotation is not None and not args.execute:
+            # Read-only planning runs on the operator controller, never in a Job.
+            try:
+                planned = subprocess.run([sys.executable, str(ROOT / 'scripts/infra/rotate_credentials.py'),
+                                          '--terraform-output', str(args.terraform_output), *arguments],
+                                         text=True, capture_output=True, check=False, timeout=120)
+            except (OSError, subprocess.TimeoutExpired) as error:
+                raise RunnerError('rotation_plan_failed', 'Credential rotation plan could not be completed') from error
+            if planned.returncode:
+                raise RunnerError('rotation_plan_failed', 'Credential rotation plan failed; verify target, operation ID and prerequisites')
+            details = json.loads(planned.stdout)
+            require(isinstance(details, dict) and details.get('status') == 'planned'
+                    and details.get('account_id') == outputs['account_id']
+                    and all(details.get(key) == rotation[key] for key in ('environment', 'service', 'backend', 'operation_id')),
+                    'Rotation planner returned inconsistent target metadata')
+            summary = {}
+            for field in ('maintenance_required', 'other_pending_operation'):
+                if field in details:
+                    require(type(details[field]) is bool, 'Rotation planner returned invalid flags')
+                    summary[field] = details[field]
+            if 'secret_count' in details:
+                require(type(details['secret_count']) is int and details['secret_count'] in (1, 2), 'Invalid rotation secret count')
+                summary['secret_count'] = details['secret_count']
+            if 'plan_steps' in details:
+                require(isinstance(details['plan_steps'], list) and len(details['plan_steps']) <= 10 and
+                        all(isinstance(step, str) and re.fullmatch(r'[a-z_]{1,80}', step) for step in details['plan_steps']),
+                        'Invalid rotation plan steps')
+                summary['plan_steps'] = details['plan_steps']
+            report['plan'] = summary
+            report.update(status='planned', phase='plan', changed=False)
+            code = 0
+        else:
+            client = Kubectl(args.context, args.kubeconfig)
+            run(outputs, client, name, args.timeout, report, rotation=rotation)
+            report.update(status="success", phase="complete")
+            code = 0
     except RunnerError as error:
         report.update(error_code=error.code, error=str(error))
     except (ValueError, KeyError, TypeError, OSError):

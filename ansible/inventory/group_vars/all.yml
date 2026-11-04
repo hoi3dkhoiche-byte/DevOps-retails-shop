@@ -19,3 +19,29 @@ retail_backend_timeout: 900
 retail_candidate_dir: "{{ retail_local_dir }}/gitops-candidate"
 retail_activate_candidate: false
 retail_preflight_phase: offline
+
+# Operational actions are plans/read-only checks until explicitly enabled.
+retail_rotation_environment: dev
+retail_rotation_service: catalog
+retail_rotation_backend: mysql
+retail_rotation_operation_id: ""
+retail_rotation_execute: false
+retail_rotation_ack_maintenance: false
+retail_rotation_rollback: false
+retail_rotation_finalize: false
+retail_rotation_ack_consumers_reloaded: false
+retail_rotation_candidate_dir: "{{ retail_local_dir }}/rotation-{{ retail_rotation_operation_id }}"
+retail_ops_report: "{{ retail_local_dir }}/operations-report.json"
+retail_ops_max_backup_age_hours: 36
+retail_ops_require_alerting: false
+retail_ops_send_test_alert: false
+retail_ops_operation_id: ""
+retail_restore_kind: rds
+retail_restore_operation_id: ""
+retail_restore_execute: false
+retail_restore_source_backup: ""
+retail_restore_plan: "{{ retail_local_dir }}/restore-plan.json"
+retail_restore_report: "{{ retail_local_dir }}/restore-report.json"
+retail_restore_approved_sha256: ""
+retail_restore_cleanup: false
+retail_restore_timeout: 3600

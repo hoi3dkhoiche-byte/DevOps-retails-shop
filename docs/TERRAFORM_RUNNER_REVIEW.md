@@ -7,7 +7,7 @@ Rà soát ngày 04/11/2026 trên baseline source `c09095dffc87fae2fe8674271113a0
 | A — RabbitMQ `.on.aws` | Lỗi thật | Runner đã nhận cả `.mq.ap-southeast-1.amazonaws.com` và `.mq.ap-southeast-1.on.aws`; vẫn yêu cầu AMQPS/5671, không credentials/path/query/fragment. Test cả flat/native outputs, sai region/đuôi giả và luồng ghi địa chỉ vào Secret/management API |
 | B — `ec2:RunInstances` | Thiếu quyền thật | Thêm statement riêng giới hạn Singapore và `ec2:LaunchTemplate` trong account. `CreateTags` đã có. Chưa dùng `ec2:IsLaunchTemplateResource=true` vì EKS còn bổ sung AMI/subnet/instance profile ngoài template |
 | C — S3 refresh | Lỗi thật với provider đã pin | Provider AWS **6.71.0** đọc accelerate và replication khi refresh bucket. Đã thêm `s3:GetAccelerateConfiguration`, `s3:GetReplicationConfiguration` cho đúng hai bucket logs/backup |
-| D — tự nâng quyền | Rủi ro thật, đã giảm nhưng chưa đóng toàn diện | Deny self-role mutation/PassRole, Deny sửa policy parts của CI, giới hạn managed attachments vào 7 AWS policy đang dùng. Inline policy/trust delegation trên các role project khác vẫn có quyền cao; cần boundary bắt buộc do admin quản lý hoặc stack IAM riêng để đóng mọi đường gián tiếp |
+| D — tự nâng quyền | Đã bổ sung mandatory boundary | Ngoài self-role Deny và managed-policy allowlist, đủ 14 role workload có boundary do admin quản lý; CI không tạo role thiếu/sai boundary, không sửa/gỡ boundary hoặc nâng IAM/STS/EKS-access qua inline policy. Preflight kiểm document và các role cũ trước plan/apply. Ceiling quyền dịch vụ vẫn cần review/live acceptance, không phải sandbox mọi tác động AWS |
 | E1 — tên output endpoint S3 | Lỗi thật | Exporter dùng đúng `s3_gateway_endpoint_id`. Test đối chiếu toàn bộ allowlist với các output Terraform và từ chối entry sensitive |
 | E2 — hash/wheel Alpine | Chưa phát hiện lỗi dependency | Chạy đúng image digest của Job với UID1000, read-only rootfs, `/tmp` executable, 512MiB/0.5CPU: pip `--require-hashes` thành công, native imports và crypto smoke đạt. Thêm gate lặp lại trong validation workflow |
 | E3 — Lease bị giữ | Hành vi fail-closed có chủ đích | Không tự chiếm Lease hết hạn. Thêm runbook dừng launcher/Job đúng holder, xác nhận writer dừng và mở khóa bằng UID/resourceVersion/holder JSON Patch |
@@ -24,16 +24,19 @@ EKS yêu cầu identity gọi CreateNodegroup/UpdateNodegroupVersion có RunInst
 
 CI role là hạ tầng có quyền cao; manual dispatch và review plan không phải IAM boundary. Self-role Deny chặn trực tiếp attach AdministratorAccess, thêm inline policy hoặc sửa trust của chính `retail-lab-terraform`. Allowlist managed attachments chặn việc attach managed policy ngoài bảy policy EKS/node/EBS đang dùng.
 
-Biện pháp này **không ngăn CI ghi inline Administrator policy vào một role project khác rồi sửa trust hoặc sử dụng role đó qua dịch vụ**. Không được mô tả template mới là mô hình chống mọi đường nâng quyền. Muốn đóng rủi ro gián tiếp cần thay đổi quyền quản lý IAM: mandatory boundary trên toàn bộ role được delegation, boundary do admin sở hữu và không thể bị sửa/gỡ; hoặc đưa IAM ra stack admin riêng. [AWS permissions boundaries](https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_boundaries.html)
+Đợt hoàn thiện tiếp theo đã thêm **boundary bắt buộc do admin sở hữu cho toàn bộ 14 role workload**: control-plane, node và IRSA. CI chỉ tạo đúng role allowlist với boundary đúng ARN; không sửa inline/trust trên role chưa có boundary, không thay/gỡ boundary và không sửa default version của policy đó. Boundary giới hạn quyền tối đa nên inline Administrator policy không thể tự cấp IAM/STS/EKS-access writes ngoài ceiling. Riêng quyền dịch vụ controller/runtime vẫn có tác động thực tế trong phạm vi được cấp; đây không phải sandbox cho mọi mã độc hoặc mọi thao tác AWS. [AWS permissions boundaries](https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_boundaries.html)
+
+Preflight so document default version với template đã render và kiểm boundary của role có sẵn; account cũ cần admin migrate trước. Workflow apply saved plan kiểm lại boundary/role bằng live API sau AWS login, dùng account từ plan metadata đã verify. Kiểm tra này không tự thay input hoặc tạo lại plan đã review.
 
 Root hiện vẫn theo dõi self-role và attachments đã import. Phiên admin phải tạo/reconcile đúng trust, max session 7200, hai default tag và toàn bộ policy parts trước khi CI chạy; no-op refresh được phép. Bất kỳ plan nào sửa các resource nền này phải được admin xử lý rồi tạo lại plan CI. Nếu chỉ thêm Deny nhưng giữ role bootstrap thiếu tag, lần CI apply đầu sẽ lỗi TagRole; runbook đã sửa cả lệnh create-role và tag-role cho role có sẵn. Xem [AWS first deployment](AWS_FIRST_DEPLOYMENT.md).
 
-Policy renderer hiện tách ba phần; tất cả đều dưới giới hạn 6144 ký tự JSON không khoảng trắng. Render lại và đọc manifest thay vì giả định chỉ có hai phần cũ. Thay file template local không tự cập nhật policy đã attach trên AWS.
+Policy renderer hiện tạo bốn phần CI và một `workload-boundary.json` riêng; tất cả đều dưới giới hạn 6144 ký tự JSON không khoảng trắng. Boundary không attach như identity policy trực tiếp vào CI. Render lại và đọc manifest thay vì giả định số phần cũ. Thay file template local không tự cập nhật policy đã attach trên AWS.
 
 ## Kiểm chứng đã thực hiện
 
-- 87 test Python hạ tầng đạt, gồm các case mới endpoint, output contract và policy guard.
-- Terraform fmt/validate và 20 native test dùng mock provider đạt; không gọi AWS.
+- Đợt A–E ban đầu: 87 test Python hạ tầng, 20 native test Terraform và Alpine smoke đạt.
+- Đợt hoàn thiện vận hành: 163 test Python hạ tầng và 60 helper test Ansible đạt trên Linux; chín playbook qua syntax-check và lint.
+- Boundary được kiểm bằng 23 native Terraform test dùng provider giả lập; fmt/validate và hai workflow actionlint đạt.
 - Chạy thành công `scripts/infra/dependency_smoke.py` với đúng pinned Alpine image và lệnh installer được chia sẻ trực tiếp từ Job.
 - Workflow Terraform có gate Alpine mới và qua actionlint.
 - Các action mới khớp Service Authorization Reference công khai của AWS; chưa chạy Access Analyzer/Policy Simulator trong account.

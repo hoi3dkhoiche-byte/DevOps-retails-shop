@@ -8,9 +8,9 @@ Tiến độ sau [đợt đối chiếu lỗi hạ tầng](INFRASTRUCTURE_REVIEW
 
 **Cập nhật hoàn thiện Terraform trước Ansible:** đã thêm kiểm tra input/account/IAM/state bucket/AZ; runner hỗ trợ BOM, kubeconfig riêng, Complete/Failed/timeout, Lease chống chạy song song và báo cáo JSON; có policy renderer chia phần theo giới hạn IAM, chế độ workflow validate-only và artifact outputs đã allowlist. Kiểm tra mới đạt 76 test Python, 20 test Terraform giả lập và actionlint. Xem [hướng dẫn account AWS mới](AWS_FIRST_DEPLOYMENT.md). Bảng vấn đề dưới đây ghi căn cứ ban đầu, không phải mọi dòng đều còn chưa sửa.
 
-**Ansible đã được triển khai:** sáu playbook, inventory localhost, dependency lock, preflight account/cluster/receipt, kubeconfig riêng, backend Job runner, GitOps candidate cô lập, bootstrap ESO/Argo CD và verify readiness. Xem [runbook](../ansible/README.md). Workflow `Retail Ansible` chỉ kiểm tra offline, không tự provision AWS.
+**Ansible đã được triển khai:** chín playbook, inventory localhost, dependency lock, preflight account/cluster/receipt, kubeconfig riêng, backend Job runner, GitOps candidate cô lập, bootstrap ESO/Argo CD, verify readiness và ba playbook vận hành rotation/restore/monitoring-backup acceptance. Xem [runbook](../ansible/README.md). Workflow `Retail Ansible` chỉ kiểm tra offline, không tự provision AWS.
 
-Kiểm chứng Ansible ngày 04/11/2026: 55 test helper trên Linux đạt; syntax-check cả sáu playbook, preflight thực chạy offline changed=0, ansible-lint không lỗi/cảnh báo và workflow mới qua actionlint. Lockfile Python 3.12/Linux x86_64 đã được kiểm tra resolution với `--require-hashes --ignore-installed`.
+Kiểm chứng cuối ngày 04/11/2026: 163 test hạ tầng, 60 helper test Ansible trên Linux và 23 native Terraform test đạt; syntax-check cả chín playbook, preflight thực chạy offline changed=0, ansible-lint không lỗi/cảnh báo và hai workflow qua actionlint. Lockfile Python 3.12/Linux x86_64 và exact Alpine Job image đã được kiểm thử.
 
 Chưa có AWS CLI/profile hoặc IAM/OIDC thật được nối trong phiên làm việc. IAM template đã đối chiếu tên action/resource-scope với metadata AWS công khai nhưng chưa chạy Access Analyzer trong account. Cần bootstrap account, live preflight, review plan và cold apply để nghiệm thu AWS. Redis node-type orderability mới chỉ kiểm tra được engine metadata trước khi có cluster; không suy thành bằng chứng capacity.
 
@@ -23,8 +23,8 @@ Chưa có AWS CLI/profile hoặc IAM/OIDC thật được nối trong phiên là
 | [Workflow Terraform](../.github/workflows/terraform.yml) | Đã có validate, plan và apply saved plan riêng; kiểm tra commit/run/attempt/checksum/thời hạn |
 | [Backend helpers](../scripts/infra/) | Đã có khởi tạo credential nền, preflight, Job bootstrap backend trong VPC và test |
 | [GitOps đã publish](https://github.com/hoi3dkhoiche-byte/DevOps-retails-shop-gitops/tree/b241c004b3a45409cb8a38e80c4bfc4bd8c0c0af) | Đã có chart platform/app, metadata prepare, bootstrap ESO/Argo CD, digest dev; AWS deployment và prod release đang tắt |
-| Ansible | Đã có sáu playbook và role/helper tại `ansible/`; kiểm chứng offline trên Linux, chưa chạy AWS thật |
-| Kiểm tra nền trong lần rà soát | 13 test hiện có của `scripts/infra` đạt; chưa chạy preflight bằng tài khoản AWS, Terraform plan/apply hay bootstrap thật |
+| Ansible | Đã có chín playbook và role/helper tại `ansible/`; kiểm chứng offline trên Linux, chưa chạy AWS thật |
+| Kiểm tra code hiện tại | 163 test hạ tầng, 60 helper test Ansible, 23 native Terraform test và lint đạt; chưa chạy preflight bằng tài khoản AWS, Terraform plan/apply hay bootstrap thật |
 
 13 test hiện tại không phủ đầy đủ response API AWS: ví dụ test EKS đang giả lập `status` khác schema hiện hành. Cần bổ sung ca lỗi thực tế trước khi coi bootstrap sẵn sàng chạy.
 

@@ -1,0 +1,10 @@
+---
+- name: Plan or execute an isolated restore drill from a reviewed backup
+  hosts: localhost
+  gather_facts: false
+  vars:
+    retail_preflight_phase: cluster
+  roles:
+    - role: preflight
+    - role: configure_context
+    - role: restore_drill

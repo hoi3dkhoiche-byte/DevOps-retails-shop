@@ -4,7 +4,7 @@ Workflow [`../../.github/workflows/gitops.yml`](../../.github/workflows/gitops.y
 
 ## Bật workflow
 
-1. Khởi tạo nhánh `main` của `hoi3dkhoiche-byte/DevOps-retails-shop-gitops` từ nội dung thư mục `gitops/`, điền cấu hình hạ tầng và bootstrap Argo CD theo hướng dẫn triển khai.
+1. Clone repo hiện hành `hoi3dkhoiche-byte/DevOps-retails-shop-gitops`; repo đã được khởi tạo. Điền cấu hình qua GitOps candidate và bootstrap theo [runbook Ansible](../../ansible/README.md). Thư mục `gitops/` trong source là seed lịch sử, không dùng để ghi đè repo hiện hành.
 2. Giữ `environments/dev/images.yaml` và `environments/prod/images.yaml` ở dạng JSON hợp lệ. JSON là YAML hợp lệ và được Helm đọc trực tiếp; các file này do automation quản lý.
 3. Tạo fine-grained PAT chỉ cho repo GitOps, quyền **Contents: Read/Write** và **Pull requests: Read/Write**. Lưu vào Actions Secret `GITOPS_TOKEN` của repo source. Giá trị token không đưa vào Git.
 4. Đặt Actions Variable `GITOPS_ENABLED=true` trong repo source. Khi chưa bật, CI ứng dụng vẫn hoạt động như hiện tại và hai job cập nhật GitOps được skip.

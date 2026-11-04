@@ -1,0 +1,57 @@
+---
+- name: Validate explicit restore operation mode
+  ansible.builtin.assert:
+    that:
+      - not ansible_check_mode
+      - retail_restore_execute is boolean
+      - retail_restore_cleanup is boolean
+      - retail_restore_kind in ['rds', 'redis', 'velero']
+      - not retail_restore_cleanup or retail_restore_execute
+      - not retail_restore_execute or retail_restore_approved_sha256 is match('^[0-9a-f]{64}$')
+      - retail_restore_execute or retail_restore_operation_id | length > 0
+      - retail_restore_execute or retail_restore_source_backup | length > 0
+    fail_msg: >-
+      Default mode only plans. Execution/cleanup requires the reviewed plan SHA256 and explicit boolean switches.
+      Use a unique operation ID and selected source backup when planning; --check is not a restore rehearsal.
+
+- name: Plan or execute only isolated restore targets
+  ansible.builtin.command:
+    argv: >-
+      {{ [ansible_playbook_python, retail_source_dir ~ '/scripts/infra/restore_backends.py',
+          '--terraform-output', retail_terraform_output, '--terraform-metadata', retail_terraform_metadata,
+          '--gitops-dir', retail_gitops_dir, '--account-id', retail_account_id,
+          '--context', retail_kube_context, '--kubeconfig', retail_kubeconfig,
+          '--report', retail_restore_report, '--plan', retail_restore_plan,
+          '--timeout', retail_restore_timeout | string]
+         + (['--execute', '--approved-sha256', retail_restore_approved_sha256]
+            if retail_restore_execute else
+            ['--kind', retail_restore_kind, '--operation-id', retail_restore_operation_id,
+             '--source-backup', retail_restore_source_backup])
+         + (['--cleanup'] if retail_restore_cleanup else []) }}
+  environment: "{{ retail_aws_environment }}"
+  register: restore_drill_command
+  changed_when: (restore_drill_command.stdout | from_json).changed | default(false) | bool
+  failed_when: false
+  no_log: true
+
+- name: Decode the safe restore report
+  ansible.builtin.set_fact:
+    restore_drill_report: "{{ restore_drill_command.stdout | from_json }}"
+
+- name: Show restore operation metadata
+  ansible.builtin.debug:
+    msg:
+      status: "{{ restore_drill_report.status }}"
+      plan_sha256: "{{ restore_drill_report.plan_sha256 | default('none') }}"
+      target: "{{ restore_drill_report.target_name | default('none') }}"
+      report: "{{ retail_restore_report }}"
+      error: "{{ restore_drill_report.error | default('none') }}"
+
+- name: Require a successful restore operation
+  ansible.builtin.assert:
+    that:
+      - restore_drill_command.rc == 0
+      - restore_drill_report.status in ['planned', 'restored', 'cleaned']
+    fail_msg: >-
+      Restore drill failed. Inspect the report and retained resources before retrying.
+      No active endpoint is switched by this workflow. AWS resources remain billable until explicit cleanup succeeds.

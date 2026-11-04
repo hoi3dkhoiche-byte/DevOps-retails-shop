@@ -24,6 +24,29 @@ resource "aws_iam_role_policy" "backend_bootstrap" {
         [for secret in aws_secretsmanager_secret.application : secret.arn],
         [for key in local.backend_bootstrap_platform_secret_keys : aws_secretsmanager_secret.monitoring[key].arn]
       )
+    },
+    {
+      Effect = "Allow"
+      Action = ["secretsmanager:PutSecretValue", "secretsmanager:UpdateSecretVersionStage"]
+      Resource = concat(
+        [for secret in aws_secretsmanager_secret.application : secret.arn],
+        [var.platform_secret_arns.redis_dev, var.platform_secret_arns.redis_prod]
+      )
+    },
+    {
+      Effect   = "Allow"
+      Action   = ["elasticache:ModifyUser"]
+      Resource = [for env in ["dev", "prod"] : "arn:aws:elasticache:ap-southeast-1:${data.aws_caller_identity.current.account_id}:user:retail-checkout-${env}"]
+    },
+    {
+      Effect   = "Allow"
+      Action   = ["elasticache:DescribeUsers", "sts:GetCallerIdentity"]
+      Resource = ["*"]
+    },
+    {
+      Effect   = "Allow"
+      Action   = ["eks:DescribeCluster"]
+      Resource = ["arn:aws:eks:ap-southeast-1:${data.aws_caller_identity.current.account_id}:cluster/retail-lab-eks"]
     }
   ] })
 }

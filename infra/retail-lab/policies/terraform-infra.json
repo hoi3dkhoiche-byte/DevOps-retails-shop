@@ -384,10 +384,77 @@
       "Resource": "arn:aws:s3:::__STATE_BUCKET__"
     },
     {
+      "Sid": "CreateBoundedProjectRoles",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole"
+      ],
+      "Resource": [
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-eks-control-plane",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-eks-nodes",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-ebs-csi",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-lb",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-autoscaler",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-rollouts",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-eso-dev",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-eso-prod",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-eso-monitoring",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-eso-argocd",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-grafana",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-loki",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-velero",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-bootstrap"
+      ],
+      "Condition": {
+        "ArnEquals": {
+          "iam:PermissionsBoundary": "arn:aws:iam::__AWS_ACCOUNT_ID__:policy/retail-lab-workload-boundary"
+        }
+      }
+    },
+    {
+      "Sid": "DenyProjectRoleCreationWithoutBoundary",
+      "Effect": "Deny",
+      "Action": [
+        "iam:CreateRole"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "ArnNotEquals": {
+          "iam:PermissionsBoundary": "arn:aws:iam::__AWS_ACCOUNT_ID__:policy/retail-lab-workload-boundary"
+        }
+      }
+    },
+    {
+      "Sid": "DenyProjectBoundaryRemoval",
+      "Effect": "Deny",
+      "Action": [
+        "iam:DeleteRolePermissionsBoundary",
+        "iam:PutRolePermissionsBoundary"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "DenyPermissionsOnUnboundedRoles",
+      "Effect": "Deny",
+      "Action": [
+        "iam:PutRolePolicy",
+        "iam:DeleteRolePolicy",
+        "iam:UpdateAssumeRolePolicy",
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy",
+        "iam:UpdateRole"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "ArnNotEquals": {
+          "iam:PermissionsBoundary": "arn:aws:iam::__AWS_ACCOUNT_ID__:policy/retail-lab-workload-boundary"
+        }
+      }
+    },
+    {
       "Sid": "ProjectIam",
       "Effect": "Allow",
       "Action": [
-        "iam:CreateRole",
         "iam:GetRole",
         "iam:UpdateRole",
         "iam:DeleteRole",
@@ -400,7 +467,22 @@
         "iam:TagRole",
         "iam:UntagRole"
       ],
-      "Resource": "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-*"
+      "Resource": [
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-eks-control-plane",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-eks-nodes",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-ebs-csi",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-lb",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-autoscaler",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-rollouts",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-eso-dev",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-eso-prod",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-eso-monitoring",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-eso-argocd",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-grafana",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-loki",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-velero",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-bootstrap"
+      ]
     },
     {
       "Sid": "AttachReviewedServicePolicies",
@@ -409,7 +491,22 @@
         "iam:AttachRolePolicy",
         "iam:DetachRolePolicy"
       ],
-      "Resource": "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-*",
+      "Resource": [
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-eks-control-plane",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-eks-nodes",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-ebs-csi",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-lb",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-autoscaler",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-rollouts",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-eso-dev",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-eso-prod",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-eso-monitoring",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-eso-argocd",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-grafana",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-loki",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-velero",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-bootstrap"
+      ],
       "Condition": {
         "ArnEquals": {
           "iam:PolicyARN": [
@@ -420,7 +517,8 @@
             "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy",
             "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore",
             "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
-          ]
+          ],
+          "iam:PermissionsBoundary": "arn:aws:iam::__AWS_ACCOUNT_ID__:policy/retail-lab-workload-boundary"
         }
       }
     },
@@ -457,7 +555,10 @@
         "iam:TagPolicy",
         "iam:UntagPolicy"
       ],
-      "Resource": "arn:aws:iam::__AWS_ACCOUNT_ID__:policy/retail-lab-terraform*"
+      "Resource": [
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:policy/retail-lab-terraform*",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:policy/retail-lab-workload-boundary"
+      ]
     },
     {
       "Sid": "IamReadPrerequisites",
@@ -539,7 +640,22 @@
       "Action": [
         "iam:PassRole"
       ],
-      "Resource": "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-*",
+      "Resource": [
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-eks-control-plane",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-eks-nodes",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-ebs-csi",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-lb",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-autoscaler",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-rollouts",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-eso-dev",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-eso-prod",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-eso-monitoring",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-eso-argocd",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-grafana",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-loki",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-velero",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-bootstrap"
+      ],
       "Condition": {
         "StringEquals": {
           "iam:PassedToService": [

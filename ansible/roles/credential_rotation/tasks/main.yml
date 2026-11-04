@@ -1,0 +1,123 @@
+---
+- name: Require explicit typed rotation switches and a reviewed application target
+  ansible.builtin.assert:
+    that:
+      - not ansible_check_mode
+      - retail_rotation_execute is boolean
+      - retail_rotation_ack_maintenance is boolean
+      - retail_rotation_rollback is boolean
+      - retail_rotation_finalize is boolean
+      - retail_rotation_ack_consumers_reloaded is boolean
+      - not (retail_rotation_rollback and retail_rotation_finalize)
+      - retail_rotation_environment in ['dev', 'prod']
+      - retail_rotation_service in ['catalog', 'cart', 'orders', 'checkout']
+      - retail_rotation_backend in ['mysql', 'rabbitmq', 'opensearch', 'redis']
+      - retail_rotation_operation_id is match('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+    fail_msg: Use explicit service/backend and UUID operation ID. Default is a read-only plan; --check is not a rotation plan.
+
+- name: Build the bounded rotation runner arguments
+  ansible.builtin.set_fact:
+    credential_rotation_report_file: "{{ retail_local_dir }}/rotation-{{ retail_rotation_operation_id }}.json"
+    credential_rotation_argv: >-
+      {{ [ansible_playbook_python, retail_source_dir ~ '/scripts/infra/run_bootstrap.py',
+          '--operation', 'rotate', '--terraform-output', retail_terraform_output,
+          '--context', retail_kube_context, '--kubeconfig', retail_kubeconfig,
+          '--timeout', retail_backend_timeout | string,
+          '--environment', retail_rotation_environment, '--service', retail_rotation_service,
+          '--backend', retail_rotation_backend, '--operation-id', retail_rotation_operation_id,
+          '--report', retail_local_dir ~ '/rotation-' ~ retail_rotation_operation_id ~ '.json']
+         + (['--execute'] if retail_rotation_execute else [])
+         + (['--ack-maintenance'] if retail_rotation_ack_maintenance else [])
+         + (['--rollback'] if retail_rotation_rollback else [])
+         + (['--finalize'] if retail_rotation_finalize else [])
+         + (['--ack-consumers-reloaded'] if retail_rotation_ack_consumers_reloaded else []) }}
+
+- name: Run a metadata-only plan or the serialized private rotation Job
+  ansible.builtin.command:
+    argv: "{{ credential_rotation_argv }}"
+    chdir: "{{ retail_source_dir }}"
+  environment: "{{ retail_aws_environment }}"
+  register: credential_rotation_result
+  no_log: true
+  failed_when: false
+  changed_when: (credential_rotation_result.stdout | from_json).changed | default(false) | bool
+
+- name: Decode the safe rotation result
+  ansible.builtin.set_fact:
+    credential_rotation_report: "{{ credential_rotation_result.stdout | from_json }}"
+  no_log: true
+
+- name: Report the operation status without credential values
+  ansible.builtin.debug:
+    msg:
+      status: "{{ credential_rotation_report.status | default('failed') }}"
+      phase: "{{ credential_rotation_report.phase | default('unknown') }}"
+      error_code: "{{ credential_rotation_report.error_code | default('none') }}"
+      operation_id: "{{ retail_rotation_operation_id }}"
+      environment: "{{ retail_rotation_environment }}"
+      service: "{{ retail_rotation_service }}"
+      backend: "{{ retail_rotation_backend }}"
+
+- name: Require a successful plan or completed backend operation
+  ansible.builtin.assert:
+    that:
+      - credential_rotation_result.rc == 0
+      - credential_rotation_report.status in ['planned', 'success']
+    fail_msg: >-
+      Rotation did not complete. Preserve the operation ID and inspect safe report/Job diagnostics.
+      Retry the same operation to resume; use the documented rollback before starting another operation.
+
+- name: Explain the GitOps handoff after an executed rotation
+  ansible.builtin.debug:
+    msg: >-
+      Backend rotation completed. Wait for ESO refresh, prepare the isolated secretRevision candidate,
+      review and merge its GitOps PR, then sync and run application acceptance.
+      A single-password maintenance window ends only after this handoff succeeds.
+  when: retail_rotation_execute and not retail_rotation_finalize
+
+- name: Wait for ESO and prepare the isolated secretRevision candidate
+  ansible.builtin.command:
+    argv:
+      - "{{ ansible_playbook_python }}"
+      - "{{ retail_source_dir }}/ansible/helpers/prepare_rotation_candidate.py"
+      - --source-dir
+      - "{{ retail_source_dir }}"
+      - --gitops-dir
+      - "{{ retail_gitops_dir }}"
+      - --local-dir
+      - "{{ retail_local_dir }}"
+      - --candidate-dir
+      - "{{ retail_rotation_candidate_dir }}"
+      - --terraform-output
+      - "{{ retail_terraform_output }}"
+      - --runner-report
+      - "{{ credential_rotation_report_file }}"
+      - --wait-eso
+      - --context
+      - "{{ retail_kube_context }}"
+      - --kubeconfig
+      - "{{ retail_kubeconfig }}"
+      - --timeout
+      - "{{ retail_backend_timeout | string }}"
+    chdir: "{{ retail_source_dir }}"
+  environment: "{{ retail_aws_environment }}"
+  register: credential_rotation_candidate
+  no_log: true
+  failed_when: false
+  changed_when: (credential_rotation_candidate.stdout | from_json).changed | default(false) | bool
+  when: retail_rotation_execute and not retail_rotation_finalize
+
+- name: Require candidate preparation before declaring the GitOps handoff ready
+  ansible.builtin.assert:
+    that:
+      - credential_rotation_candidate.rc == 0
+    fail_msg: >-
+      Backend rotation succeeded but ESO or candidate preparation did not complete.
+      Preserve the successful runner report and resume prepare_rotation_candidate.py with that report;
+      do not start a new rotation or change its operation ID just to retry this handoff.
+  when: retail_rotation_execute and not retail_rotation_finalize
+
+- name: Show the local candidate for review and a GitOps PR
+  ansible.builtin.debug:
+    msg: "Review {{ retail_rotation_candidate_dir }}, merge its GitOps PR, sync and run application acceptance."
+  when: retail_rotation_execute and not retail_rotation_finalize

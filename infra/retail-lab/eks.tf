@@ -1,6 +1,7 @@
 resource "aws_iam_role" "cluster" {
-  name               = "retail-lab-eks-control-plane"
-  assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Principal = { Service = "eks.amazonaws.com" }, Action = "sts:AssumeRole" }] })
+  permissions_boundary = data.aws_iam_policy.workload_boundary.arn
+  name                 = "retail-lab-eks-control-plane"
+  assume_role_policy   = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Principal = { Service = "eks.amazonaws.com" }, Action = "sts:AssumeRole" }] })
 }
 resource "aws_iam_role_policy_attachment" "cluster" {
   for_each   = toset(["AmazonEKSClusterPolicy", "AmazonEKSVPCResourceController"])
@@ -40,8 +41,9 @@ resource "aws_eks_access_policy_association" "admin" {
   access_scope { type = "cluster" }
 }
 resource "aws_iam_role" "nodes" {
-  name               = "retail-lab-eks-nodes"
-  assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Principal = { Service = "ec2.amazonaws.com" }, Action = "sts:AssumeRole" }] })
+  permissions_boundary = data.aws_iam_policy.workload_boundary.arn
+  name                 = "retail-lab-eks-nodes"
+  assume_role_policy   = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Principal = { Service = "ec2.amazonaws.com" }, Action = "sts:AssumeRole" }] })
 }
 resource "aws_iam_role_policy_attachment" "nodes" {
   for_each   = toset(["AmazonEKSWorkerNodePolicy", "AmazonEC2ContainerRegistryPullOnly", "AmazonEKS_CNI_Policy", "AmazonSSMManagedInstanceCore"])

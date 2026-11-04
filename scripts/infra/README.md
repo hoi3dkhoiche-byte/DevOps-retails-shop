@@ -1,5 +1,7 @@
 # Retail lab infrastructure
 
+Current operational entrypoints are documented in the [Ansible runbook](../../ansible/README.md): mandatory admin-owned workload boundary, [credential rotation](../../docs/CREDENTIAL_ROTATION.md), [isolated restore drills](../../docs/RESTORE_DRILL.md), and [monitoring/backup acceptance](../../docs/OPERATIONS_ACCEPTANCE.md). Rotation shares the bootstrap Lease, defaults to a plan, and requires a separate finalize after consumers reload. Restore defaults to a checksum-bound plan and never switches live endpoints. These helpers are code-complete for their documented scope; account-side API acceptance, alert delivery and SQL/cache recovery evidence must still be collected on AWS.
+
 This root implements the architecture in `Thiết kế kiến trúc chi tiết.docx`, with the user's clarification that one RDS MySQL instance has separate service/environment databases and OpenSearch remains a separate search backend. It does not replace the upstream examples under `retail-store-sample-app/terraform`.
 
 The target is Singapore, EKS 1.36, three AZs and management/dev/prod node groups. Terraform owns AWS resources and the CNI, CoreDNS, kube-proxy and EBS CSI managed add-ons. Argo CD owns application/platform charts. Amazon MQ uses a private three-AZ RabbitMQ 4.2 cluster; RDS and Redis start with the specified lab capacity. EFS remains disabled until an actual shared-file workload exists.

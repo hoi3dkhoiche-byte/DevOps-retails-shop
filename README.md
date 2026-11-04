@@ -20,7 +20,7 @@ Kiến trúc triển khai dùng một EKS tại Singapore, ba node group managem
 - [`retail-store-sample-app`](retail-store-sample-app): source, Dockerfile, Helm chart và test ứng dụng.
 - [`.github/workflows/ci.yml`](.github/workflows/ci.yml): CI ứng dụng. [`docs/CI.md`](retail-store-sample-app/docs/CI.md) mô tả gate và artifact.
 - [`infra/retail-lab`](infra/retail-lab): Terraform cho kiến trúc mới. Các module trong `retail-store-sample-app/terraform` là mẫu upstream, không phải entrypoint của lab mới.
-- [`ansible/`](ansible/README.md): sáu playbook kiểm tra, khởi tạo backend, chuẩn bị GitOps candidate và bootstrap ESO/Argo CD sau Terraform. Workflow `Retail Ansible` chỉ kiểm tra offline.
+- [`ansible/`](ansible/README.md): bootstrap backend/ESO/Argo CD, GitOps candidate và playbook rotation, restore drill, monitoring/backup acceptance. Workflow `Retail Ansible` chỉ kiểm tra offline.
 - [`scripts/infra/README.md`](scripts/infra/README.md): preflight, plan/apply và bootstrap database/secret từ trong VPC.
 - [Repo GitOps](https://github.com/hoi3dkhoiche-byte/DevOps-retails-shop-gitops): cấu hình triển khai hiện hành, phiên bản platform đã khóa và hướng dẫn bootstrap. Thư mục [`gitops/`](gitops/) ở repo source là seed ban đầu.
 - [`scripts/gitops/README.md`](scripts/gitops/README.md): tự tạo PR image và nghiệm thu/promote dev → prod.

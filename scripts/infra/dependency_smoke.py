@@ -23,6 +23,7 @@ def main():
                "--env", "PYTHONPATH=/tmp/dependencies", "--env", "PYTHONDONTWRITEBYTECODE=1",
                IMAGE, "sh", "-ec", DEPENDENCY_INSTALL_COMMAND + "; "
                "python /work/scripts/infra/crypto_smoke.py; "
+               "python /work/scripts/infra/rotate_credentials.py --help >/dev/null; "
                "python -c 'import boto3, botocore, pymysql, bcrypt, cryptography; "
                "print(\"Pinned Alpine hash install and native-library imports passed.\")'"]
     try:

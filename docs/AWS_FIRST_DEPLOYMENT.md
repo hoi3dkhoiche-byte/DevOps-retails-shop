@@ -48,7 +48,7 @@ Không đặt expiration cho state/lock. Preflight kiểm tra owner, region, ver
 python3 scripts/infra/render_terraform_policy.py --account-id "$ACCOUNT_ID" --state-bucket manhnguyen1131
 ```
 
-Kết quả nằm trong `.ci-tools/aws-bootstrap/`: các policy JSON, `trust.json` và `manifest.json`. Mỗi phần tối đa 6144 ký tự JSON không khoảng trắng. Manifest có primary ARN và additional ARNs để điền tfvars. Renderer không gọi AWS và không cấp quyền.
+Kết quả nằm trong `.ci-tools/aws-bootstrap/`: các policy CI JSON, `workload-boundary.json`, `trust.json` và `manifest.json`. Mỗi phần tối đa 6144 ký tự JSON không khoảng trắng. Manifest có primary/additional ARNs và thông tin boundary để điền tfvars. Renderer không gọi AWS và không cấp quyền.
 
 Đọc toàn bộ policy trước khi dùng. Đây là policy **hạ tầng có quyền quản lý IAM của project**, không phải policy app CI. VPC/network create/relationship operations và một số read/list dùng Resource `*` với giới hạn region do resource mới chưa có ID; Route 53/ACM chỉ dùng khi có domain. Hãy thu hẹp zone hoặc bỏ nhóm domain nếu không cần. Không coi template là bản đã được IAM Access Analyzer nghiệm thu.
 
@@ -60,7 +60,18 @@ Kiểm tra từng file bằng Access Analyzer trong account:
 aws accessanalyzer validate-policy --policy-type IDENTITY_POLICY --policy-document file://.ci-tools/aws-bootstrap/retail-lab-terraform.json
 ```
 
-Lặp lại với các phần `-02`, `-03` nếu có. Sửa mọi ERROR trước khi tạo policy; review các finding còn lại theo phạm vi lab. Tạo từng managed policy bằng `aws iam create-policy --policy-name <name-trong-manifest> --policy-document file://<file>`. Nếu policy đã tồn tại, review version hiện hành rồi cập nhật có chủ đích; không tạo duplicate hoặc tự attach AdministratorAccess để chữa lỗi.
+Lặp lại với **mọi phần trong manifest**, kể cả `-04` nếu renderer tạo ra. Sửa mọi ERROR trước khi tạo policy; review các finding còn lại theo phạm vi lab. Tạo từng managed policy bằng `aws iam create-policy --policy-name <name-trong-manifest> --policy-document file://<file>`. Nếu policy đã tồn tại, review version hiện hành rồi cập nhật có chủ đích; không tạo duplicate hoặc tự attach AdministratorAccess để chữa lỗi.
+
+Boundary workload được **admin tạo và giữ quyền sửa riêng**, không attach như một policy cấp quyền trực tiếp cho CI:
+
+```bash
+aws accessanalyzer validate-policy --policy-type IDENTITY_POLICY --policy-document file://.ci-tools/aws-bootstrap/workload-boundary.json
+aws iam create-policy --policy-name retail-lab-workload-boundary --policy-document file://.ci-tools/aws-bootstrap/workload-boundary.json
+```
+
+Chỉ create khi chưa có; với policy đã có, admin review/cập nhật default version cho khớp template mới. Điền `terraform_workload_boundary_arn` bằng ARN trong manifest. Preflight kiểm tra default-version document khớp canonical hash của template đã render; sai policy/version/account sẽ chặn plan. Apply saved plan kiểm tra lại boundary ngay trước apply, không tin metadata đã đọc ở lượt plan cũ.
+
+Terraform gắn boundary bắt buộc cho control-plane, node và các IRSA role. CI không được tạo role thiếu/sai boundary, gỡ/thay boundary hoặc sửa policy boundary. Nếu triển khai nâng cấp trên role đã có, admin phải gắn đúng boundary trước khi dùng CI; không để CI tự nới quyền trong quá trình chuyển đổi. Service-linked role do AWS quản lý không thuộc tập role project được delegation.
 
 ## 4. GitHub OIDC và Terraform role
 
@@ -83,7 +94,7 @@ aws iam tag-role --role-name retail-lab-terraform --tags Key=Project,Value=retai
 
 Nếu plan định sửa role/trust/tag/attachment của chính CI, dừng để admin review và apply phần nền bằng phiên admin rồi tạo lại plan CI; không bỏ Deny để CI tự cấp quyền. Cập nhật policy parts phải render/review/attach đủ manifest mới bằng admin; số phần có thể thay đổi. Không dùng role CI để chạy các lệnh bootstrap IAM này.
 
-Các managed policy được CI attach vào role project đã được giới hạn vào 7 policy EKS/node/EBS đang dùng. Đây là biện pháp bảo vệ trực tiếp role CI, **chưa phải mô hình chống mọi đường nâng quyền**: quyền inline policy/trust trên role workload vẫn là delegation IAM có quyền cao. Muốn giới hạn toàn diện cần boundary bắt buộc do admin quản lý trên mọi role được CI tạo, hoặc tách IAM sang stack admin; chưa triển khai hai thay đổi kiến trúc đó trong lab này. [AWS permissions boundaries](https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_boundaries.html)
+Các managed policy được CI attach vào role project được giới hạn vào 7 policy EKS/node/EBS đang dùng. Boundary bắt buộc giới hạn quyền tối đa của các role workload, chặn IAM privilege mutation, STS assume/pass-role, EKS access elevation và các resource-policy writes đã xác định, ngay cả khi inline policy của role bị nới. Đây là ceiling cho quyền runtime của lab, không phải sandbox cho mọi tác động AWS: controller vẫn có quyền dịch vụ cần thiết trong phạm vi đã review; hiệu lực cuối còn phụ thuộc SCP/resource policies của account và cần Policy Simulator/live acceptance. [AWS permissions boundaries](https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_boundaries.html)
 
 Terraform role, service-linked role do Terraform tạo và versioning của state có `prevent_destroy`. Khi dọn lab, giữ các thành phần nền này; nếu muốn đổi quyền quản lý thì dùng quy trình state handoff được review, không tắt bảo vệ và chạy destroy toàn bộ theo thói quen.
 
@@ -92,7 +103,7 @@ Terraform role, service-linked role do Terraform tạo và versioning của stat
 Làm theo [infra runbook](../scripts/infra/README.md) để chạy `init-platform` bằng quyền operator. Bốn platform Secret phải có AWSCURRENT trước plan; chỉ ARN đi vào tfvars. Chạy resolver chọn add-on tương thích EKS tại Singapore. Điền:
 
 - Public IPv4 `/32` thật của máy sẽ quản trị EKS; IP tài liệu/private không được chấp nhận.
-- Role admin có thật, OIDC provider ARN, primary/additional policy ARNs từ manifest.
+- Role admin có thật, OIDC provider ARN, primary/additional policy ARNs và `terraform_workload_boundary_arn` từ manifest.
 - Bốn ARN platform Secret; pin add-on builds từ API.
 - Domain/hosted zone nếu dùng; có thể giữ rỗng cho lab.
 

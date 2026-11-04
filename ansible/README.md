@@ -2,7 +2,7 @@
 
 Terraform quản lý AWS infrastructure; Ansible chạy các thao tác bootstrap sau Terraform và kiểm tra kết quả; Argo CD tiếp tục quản lý cấu hình ứng dụng/platform trong GitOps. Không SSH vào managed node để cài Kubernetes hoặc backend.
 
-Các playbook đã được viết và kiểm thử offline. Ngày 04/11/2026: 55 test helper trên Linux đạt, sáu playbook qua syntax-check, preflight chạy thành công với changed=0, ansible-lint và actionlint đạt. Chưa chạy chúng với AWS thật vì máy chưa được cấu hình AWS CLI/đăng nhập. Bắt đầu phần account/OIDC/state tại [AWS_FIRST_DEPLOYMENT.md](../docs/AWS_FIRST_DEPLOYMENT.md).
+Các playbook đã được viết và kiểm thử offline. Bộ hiện tại có chín playbook, gồm bootstrap và vận hành; các kiểm tra Linux không thay thế nghiệm thu AWS thật. Bắt đầu phần account/OIDC/state tại [AWS_FIRST_DEPLOYMENT.md](../docs/AWS_FIRST_DEPLOYMENT.md).
 
 ## Controller và dependency
 
@@ -87,14 +87,24 @@ python .ci-tools/gitops-publish/scripts/release/accept_dev.py --help
 
 Helper acceptance hiện dùng `kubectl --context`, nên biến `KUBECONFIG` là cần thiết. Không tự tạo `accepted.json` hoặc bật production chỉ vì pod Ready.
 
-## Kiểm tra code
+## Vận hành sau khi dev hoạt động
+
+| Playbook | Mặc định | Chế độ ghi có chủ đích |
+| --- | --- | --- |
+| `rotate-credentials.yml` | Plan một service/backend/môi trường | `retail_rotation_execute: true`; stage → kiểm auth → publish → chờ ESO → tạo candidate; review/merge/sync rồi acceptance và finalize thu hồi password cũ |
+| `restore-drill.yml` | Tạo plan restore có SHA256 | Execute đúng plan/hash tạo RDS/Redis hoặc namespace Velero cô lập; cleanup có chủ đích theo cùng ownership; không đổi endpoint ứng dụng |
+| `verify-operations.yml` | Đọc scrape/query, receiver và backup thật | Chỉ gửi alert khi bật switch riêng; gửi thành công vẫn cần bằng chứng người nhận trước khi kết luận delivery |
+
+Xem [rotation](../docs/CREDENTIAL_ROTATION.md), [restore drill](../docs/RESTORE_DRILL.md) và [operations acceptance](../docs/OPERATIONS_ACCEPTANCE.md) để đặt operation ID, chọn backup, review kế hoạch, resume/rollback/finalize và thu dọn tài nguyên thử nghiệm. Các file plan/report chỉ có metadata, nằm trong `.ci-tools/ansible` được ignore. Restore API thành công không chứng minh nội dung SQL/cache đúng hoặc RTO/RPO của ứng dụng.
+
+## Kiểm tra code và vận hành offline
 
 Từ `ansible/` trên controller đã cài dependency:
 
 ```bash
 python -B -m unittest discover -s tests -p 'test_*.py' -v
 ansible-lint --offline
-for play in preflight init-platform bootstrap-backends prepare-gitops bootstrap-argocd verify; do
+for play in preflight init-platform bootstrap-backends prepare-gitops bootstrap-argocd verify rotate-credentials verify-operations restore-drill; do
   ansible-playbook --syntax-check "$play.yml"
 done
 ansible-playbook preflight.yml

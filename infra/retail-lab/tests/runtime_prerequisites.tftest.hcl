@@ -1,4 +1,9 @@
 mock_provider "aws" {
+  mock_data "aws_iam_policy" {
+    defaults = {
+      policy = replace(replace(file("policies/workload-boundary.json"), "__AWS_ACCOUNT_ID__", "111122223333"), "__AWS_REGION__", "ap-southeast-1")
+    }
+  }
   mock_data "aws_caller_identity" {
     defaults = { account_id = "111122223333" }
   }
@@ -35,10 +40,11 @@ mock_provider "tls" {
 }
 
 variables {
-  admin_cidrs              = ["8.8.8.8/32"]
-  admin_role_arn           = "arn:aws:iam::111122223333:role/offline-admin"
-  github_oidc_provider_arn = "arn:aws:iam::111122223333:oidc-provider/token.actions.githubusercontent.com"
-  terraform_policy_arn     = "arn:aws:iam::111122223333:policy/offline-infra"
+  admin_cidrs                     = ["8.8.8.8/32"]
+  admin_role_arn                  = "arn:aws:iam::111122223333:role/offline-admin"
+  github_oidc_provider_arn        = "arn:aws:iam::111122223333:oidc-provider/token.actions.githubusercontent.com"
+  terraform_workload_boundary_arn = "arn:aws:iam::111122223333:policy/retail-lab-workload-boundary"
+  terraform_policy_arn            = "arn:aws:iam::111122223333:policy/offline-infra"
   addon_versions = {
     vpc_cni    = "v1.21.1-eksbuild.1"
     coredns    = "v1.13.0-eksbuild.1"
@@ -134,4 +140,41 @@ run "repository_credentials_are_only_read_by_argocd_eso" {
     ])
     error_message = "The backend bootstrap Job must not read or overwrite repository credentials."
   }
+}
+
+run "all_runtime_roles_use_the_admin_owned_boundary" {
+  command = plan
+  assert {
+    condition = alltrue(concat(
+      [aws_iam_role.cluster.permissions_boundary == var.terraform_workload_boundary_arn,
+      aws_iam_role.nodes.permissions_boundary == var.terraform_workload_boundary_arn],
+      [for role in aws_iam_role.workload : role.permissions_boundary == var.terraform_workload_boundary_arn]
+    ))
+    error_message = "Every delegated EKS, node and IRSA role must retain the admin-owned permission ceiling."
+  }
+  assert {
+    condition = toset(concat(
+      [aws_iam_role.cluster.name, aws_iam_role.nodes.name],
+      [for role in aws_iam_role.workload : role.name]
+      )) == toset([
+      for arn in one([for statement in jsondecode(file("${path.module}/policies/terraform-infra.json")).Statement : statement if statement.Sid == "ProjectIam"]).Resource :
+      reverse(split("/", arn))[0]
+    ])
+    error_message = "The CI IAM allowlist must cover exactly the runtime roles declared in Terraform."
+  }
+}
+
+run "reject_an_unreviewed_boundary_arn" {
+  command = plan
+  variables { terraform_workload_boundary_arn = "arn:aws:iam::111122223333:policy/unreviewed" }
+  expect_failures = [var.terraform_workload_boundary_arn]
+}
+
+run "reject_a_tampered_boundary_document" {
+  command = plan
+  override_data {
+    target = data.aws_iam_policy.workload_boundary
+    values = { policy = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"*\",\"Resource\":\"*\"}]}" }
+  }
+  expect_failures = [data.aws_iam_policy.workload_boundary]
 }

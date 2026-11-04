@@ -56,7 +56,7 @@ jobs:
       - name: Check all playbook syntax
         run: |
           set -euo pipefail
-          for play in preflight init-platform bootstrap-backends prepare-gitops bootstrap-argocd verify; do
+          for play in preflight init-platform bootstrap-backends prepare-gitops bootstrap-argocd verify rotate-credentials verify-operations restore-drill; do
             ansible-playbook --syntax-check "$play.yml"
           done
       - name: Run the offline preflight playbook

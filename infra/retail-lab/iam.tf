@@ -45,8 +45,9 @@ locals {
   }
 }
 resource "aws_iam_role" "workload" {
-  for_each = local.service_accounts
-  name     = "retail-lab-${each.key}"
+  for_each             = local.service_accounts
+  name                 = "retail-lab-${each.key}"
+  permissions_boundary = data.aws_iam_policy.workload_boundary.arn
   assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{
     Effect    = "Allow", Principal = { Federated = aws_iam_openid_connect_provider.eks.arn }, Action = "sts:AssumeRoleWithWebIdentity"
     Condition = { StringEquals = { "${local.oidc_host}:aud" = "sts.amazonaws.com", "${local.oidc_host}:sub" = "system:serviceaccount:${each.value}" } }
