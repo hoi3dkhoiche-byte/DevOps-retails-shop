@@ -1,0 +1,6 @@
+---
+- name: Check the maintained source and GitOps configuration without AWS
+  hosts: localhost
+  gather_facts: false
+  roles:
+    - role: preflight

@@ -234,7 +234,7 @@ def main():
     else:
         if not args.terraform_output:
             parser.error("configure requires --terraform-output")
-        configure(client, json.loads(args.terraform_output.read_text()), args.rds_ca)
+        configure(client, json.loads(args.terraform_output.read_text(encoding="utf-8-sig")), args.rds_ca)
 
 
 if __name__ == "__main__":

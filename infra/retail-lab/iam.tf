@@ -109,6 +109,7 @@ resource "aws_iam_role_policy" "lb" {
 resource "aws_iam_role" "terraform" {
   name                 = "retail-lab-terraform"
   max_session_duration = 7200
+  lifecycle { prevent_destroy = true }
   assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{
     Effect    = "Allow", Principal = { Federated = var.github_oidc_provider_arn }, Action = "sts:AssumeRoleWithWebIdentity"
     Condition = { StringEquals = { "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com", "token.actions.githubusercontent.com:sub" = "repo:hoi3dkhoiche-byte/DevOps-retails-shop:ref:refs/heads/main" } }
@@ -119,8 +120,33 @@ resource "aws_iam_role" "terraform" {
 variable "terraform_policy_arn" {
   description = "Reviewed infrastructure policy attached to the dedicated GitHub Terraform role."
   type        = string
+  validation {
+    condition = can(regex("^arn:aws:iam::[0-9]{12}:policy/[A-Za-z0-9+=,.@_/-]+$", var.terraform_policy_arn)) && !strcontains(lower(var.terraform_policy_arn), "replace") && try(
+      split(":", var.terraform_policy_arn)[4] == split(":", var.admin_role_arn)[4], false
+    )
+    error_message = "Use the reviewed customer-managed infrastructure policy ARN in the administration role's account, without placeholders."
+  }
+}
+variable "terraform_additional_policy_arns" {
+  description = "Additional reviewed infrastructure policy parts when the complete policy exceeds the IAM managed-policy size limit."
+  type        = set(string)
+  default     = []
+  validation {
+    condition = length(var.terraform_additional_policy_arns) <= 9 && !contains(var.terraform_additional_policy_arns, var.terraform_policy_arn) && alltrue([
+      for arn in var.terraform_additional_policy_arns :
+      can(regex("^arn:aws:iam::[0-9]{12}:policy/[A-Za-z0-9+=,.@_/-]+$", arn)) && !strcontains(lower(arn), "replace") && try(
+        split(":", arn)[4] == split(":", var.admin_role_arn)[4], false
+      )
+    ])
+    error_message = "Use at most nine distinct additional reviewed policy ARNs in the administration role's account; exclude the primary policy and placeholders."
+  }
 }
 resource "aws_iam_role_policy_attachment" "terraform" {
   role       = aws_iam_role.terraform.name
   policy_arn = var.terraform_policy_arn
+}
+resource "aws_iam_role_policy_attachment" "terraform_additional" {
+  for_each   = var.terraform_additional_policy_arns
+  role       = aws_iam_role.terraform.name
+  policy_arn = each.value
 }

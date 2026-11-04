@@ -11,6 +11,28 @@ import plan_contract
 import preflight
 
 
+def valid_config():
+    account = "111122223333"
+    return {"admin_cidrs": ["8.8.8.8/32"], "admin_role_arn": "arn:aws:iam::" + account + ":role/retail-admin",
+            "github_oidc_provider_arn": "arn:aws:iam::" + account + ":oidc-provider/token.actions.githubusercontent.com",
+            "terraform_policy_arn": "arn:aws:iam::" + account + ":policy/retail-infra",
+            "addon_versions": {"vpc_cni": "v1.21.1-eksbuild.1", "coredns": "v1.13.0-eksbuild.1",
+                               "kube_proxy": "v1.36.0-eksbuild.1", "ebs_csi": "v1.51.0-eksbuild.1"},
+            "platform_secret_arns": {key: "arn:aws:secretsmanager:ap-southeast-1:" + account + ":secret:/retail/platform/" + key + "-ABC123"
+                                     for key in preflight.PLATFORM_SECRET_KEYS}}
+
+
+def state_response(service, operation, *args):
+    if operation == "head-bucket": return {"BucketRegion": "ap-southeast-1"}
+    if operation == "get-bucket-location": return {"LocationConstraint": "ap-southeast-1"}
+    if operation == "get-bucket-versioning": return {"Status": "Enabled"}
+    if operation == "get-public-access-block": return {"PublicAccessBlockConfiguration": {
+        "BlockPublicAcls": True, "IgnorePublicAcls": True, "BlockPublicPolicy": True, "RestrictPublicBuckets": True}}
+    if operation == "get-bucket-encryption": return {"ServerSideEncryptionConfiguration": {"Rules": [
+        {"ApplyServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}]}}
+    raise AssertionError(operation)
+
+
 class SavedPlanTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
@@ -68,10 +90,14 @@ class SavedPlanTests(unittest.TestCase):
 
 class RegionalPreflightTests(unittest.TestCase):
     def setUp(self):
-        self.config = {"addon_versions": {"vpc_cni": "v1.21.1-eksbuild.1", "coredns": "v1.13.0-eksbuild.1", "kube_proxy": "v1.36.0-eksbuild.1", "ebs_csi": "v1.51.0-eksbuild.1"},
-            "platform_secret_arns": {"mq_admin": "arn:secret"}}
+        self.config = valid_config()
 
     def aws(self, service, operation, *args):
+        if service == "sts": return {"Account": "111122223333"}
+        if service == "s3api": return state_response(service, operation, *args)
+        if operation == "describe-instance-type-offerings": return {"InstanceTypeOfferings": [
+            {"InstanceType": instance, "LocationType": "availability-zone", "Location": zone}
+            for instance, zones in preflight.WORKER_OFFERINGS.items() for zone in zones]}
         if operation == "describe-cluster-versions": return {"clusterVersions": [{"clusterVersion": "1.36", "status": "standard-support", "versionStatus": "STANDARD_SUPPORT"}]}
         if operation == "describe-addon-versions":
             name = args[args.index("--addon-name") + 1]
@@ -84,9 +110,11 @@ class RegionalPreflightTests(unittest.TestCase):
         if operation == "describe-broker-instance-options": return {"brokerInstanceOptions": [{"supportedDeploymentModes": ["CLUSTER_MULTI_AZ"]}]}
         if operation == "list-versions": return {"Versions": ["OpenSearch_3.3"]}
         if operation == "describe-instance-type-limits": return search_limits()
-        if operation == "get-role": return {"Role": search_role()}
+        if operation == "get-role":
+            return {"Role": {"Arn": self.config["admin_role_arn"]}} if args[-1] == "retail-admin" else {"Role": search_role()}
+        if operation == "get-open-id-connect-provider": return {"Url": "token.actions.githubusercontent.com", "ClientIDList": ["sts.amazonaws.com"]}
+        if operation == "get-policy": return {"Policy": {"Arn": args[-1], "IsAttachable": True}}
         if operation == "describe-secret": return {"VersionIdsToStages": {"version-id": ["AWSCURRENT"]}}
-        if operation == "head-bucket": return {}
         raise AssertionError(operation)
 
     def test_all_regional_prerequisites_are_checked_read_only(self):
@@ -98,6 +126,8 @@ class RegionalPreflightTests(unittest.TestCase):
             aws.assert_any_call("opensearch", "describe-instance-type-limits", "--engine-version", "OpenSearch_3.3",
                                 "--instance-type", "r8g.medium.search")
             self.assertNotIn("get-secret-value", operations)
+            self.assertEqual(aws.call_args_list[0].args, ("sts", "get-caller-identity"))
+            aws.assert_any_call("s3api", "head-bucket", "--bucket", "manhnguyen1131", "--expected-bucket-owner", "111122223333")
 
     def test_unsupported_or_old_addon_fails(self):
         with patch.object(preflight, "aws", side_effect=self.aws):
@@ -123,8 +153,11 @@ class RegionalPreflightTests(unittest.TestCase):
         for fields in ({"versionStatus": "EXTENDED_SUPPORT", "status": "standard-support"},
                        {"versionStatus": "UNSUPPORTED"}, {"status": "extended-support"}, {},
                        {"versionStatus": "NEW_UNKNOWN_STATUS"}):
-            with self.subTest(fields=fields), patch.object(preflight, "aws", return_value={
-                    "clusterVersions": [{"clusterVersion": "1.36", **fields}]}), self.assertRaises(ValueError):
+            def response(service, operation, *args):
+                if operation == "describe-cluster-versions":
+                    return {"clusterVersions": [{"clusterVersion": "1.36", **fields}]}
+                return self.aws(service, operation, *args)
+            with self.subTest(fields=fields), patch.object(preflight, "aws", side_effect=response), self.assertRaisesRegex(ValueError, "EKS 1.36"):
                 preflight.check(self.config)
 
     def test_instance_limits_api_failure_stops_preflight(self):
@@ -134,6 +167,138 @@ class RegionalPreflightTests(unittest.TestCase):
             return self.aws(service, operation, *args)
         with patch.object(preflight, "aws", side_effect=unsupported), self.assertRaisesRegex(ValueError, "DescribeInstanceTypeLimits failed"):
             preflight.check(self.config)
+
+    def test_wrong_live_account_stops_before_other_aws_calls(self):
+        with patch.object(preflight, "aws", return_value={"Account": "999988887777"}) as api, self.assertRaisesRegex(ValueError, "caller account"):
+            preflight.check(self.config)
+        api.assert_called_once_with("sts", "get-caller-identity")
+
+    def test_missing_or_wrong_iam_prerequisite_stops_before_state_and_capacity(self):
+        cases = (("get-role", {"Role": {"Arn": "arn:aws:iam::111122223333:role/wrong"}}),
+                 ("get-open-id-connect-provider", {"Url": "token.actions.githubusercontent.com", "ClientIDList": []}),
+                 ("get-policy", {"Policy": {"Arn": self.config["terraform_policy_arn"], "IsAttachable": False}}))
+        for operation, result in cases:
+            def response(service, name, *args):
+                return result if name == operation else self.aws(service, name, *args)
+            with self.subTest(operation=operation), patch.object(preflight, "aws", side_effect=response) as api, self.assertRaises(ValueError):
+                preflight.check(self.config)
+            self.assertFalse(any(call.args[0] == "s3api" for call in api.call_args_list))
+
+    def test_iam_read_denial_is_a_prerequisite_failure(self):
+        error = subprocess.CalledProcessError(254, ["aws"], stderr="AccessDenied")
+        with patch.object(preflight, "aws", side_effect=error), self.assertRaisesRegex(ValueError, "Cannot verify"):
+            preflight.check_iam_prerequisites(self.config)
+
+
+class InputPreflightTests(unittest.TestCase):
+    def test_real_shaped_inputs_are_accepted_without_aws_calls(self):
+        with patch.object(preflight, "aws") as api:
+            self.assertEqual(preflight.validate_inputs(valid_config()), "111122223333")
+        api.assert_not_called()
+
+    def test_private_documentation_multicast_or_non_host_admin_ranges_stop_before_aws(self):
+        for cidr in ("10.0.0.1/32", "192.168.1.1/32", "100.64.0.1/32", "127.0.0.1/32",
+                     "192.0.2.10/32", "198.51.100.10/32", "203.0.113.10/32", "224.0.0.1/32",
+                     "240.0.0.1/32", "0.0.0.0/0", "8.8.8.8/24", "8.8.8.8", "2001:4860:4860::8888/128"):
+            config = valid_config()
+            config["admin_cidrs"] = [cidr]
+            with self.subTest(cidr=cidr), patch.object(preflight, "aws") as api, self.assertRaisesRegex(ValueError, "admin_cidrs"):
+                preflight.check(config)
+            api.assert_not_called()
+
+    def test_placeholder_or_cross_account_inputs_are_rejected(self):
+        cases = []
+        for key in ("admin_role_arn", "github_oidc_provider_arn", "terraform_policy_arn"):
+            config = valid_config()
+            config[key] = config[key].replace("111122223333", "123456789012")
+            cases.append(config)
+        config = valid_config()
+        config["admin_role_arn"] += "/REPLACE_ADMIN_ROLE"
+        cases.append(config)
+        for replacement in ("arn:aws:secretsmanager:us-east-1:111122223333:secret:real-ABC123",
+                            "arn:aws:secretsmanager:ap-southeast-1:999988887777:secret:real-ABC123",
+                            "actual-password-does-not-belong-here"):
+            config = valid_config()
+            config["platform_secret_arns"]["mq_admin"] = replacement
+            cases.append(config)
+        config = valid_config()
+        del config["platform_secret_arns"]["redis_prod"]
+        cases.append(config)
+        for config in cases:
+            with self.subTest(config=config), patch.object(preflight, "aws") as api, self.assertRaises(ValueError):
+                preflight.check(config)
+            api.assert_not_called()
+
+    def test_domain_and_zone_must_form_a_real_target(self):
+        for domain, zone in (("shop.example.com", "ZABC123"), ("retail.test", "ZABC123"),
+                             ("https://retail.company.vn", "ZABC123"), ("retail.company.vn", ""),
+                             ("", "ZABC123"), ("retail.company.vn", "not-a-zone")):
+            config = valid_config()
+            config.update(domain=domain, hosted_zone_id=zone)
+            with self.subTest(domain=domain, zone=zone), self.assertRaises(ValueError):
+                preflight.validate_inputs(config)
+        config = valid_config()
+        config.update(domain="company.vn", hosted_zone_id="ZABC123")
+        preflight.validate_inputs(config)
+
+    def test_additional_policies_are_distinct_bounded_and_same_account(self):
+        arn = "arn:aws:iam::111122223333:policy/retail-extra"
+        for values in ("not-a-list", [arn, arn], [valid_config()["terraform_policy_arn"]],
+                       [arn.replace("111122223333", "999988887777")], [arn + "/REPLACE"],
+                       [arn + str(index) for index in range(10)]):
+            config = valid_config()
+            config["terraform_additional_policy_arns"] = values
+            with self.subTest(values=values), self.assertRaisesRegex(ValueError, "additional Terraform policy"):
+                preflight.validate_inputs(config)
+        config = valid_config()
+        config["terraform_additional_policy_arns"] = [arn]
+        preflight.validate_inputs(config)
+
+
+class StateBucketPreflightTests(unittest.TestCase):
+    def test_bucket_metadata_checks_are_read_only_and_owner_bound(self):
+        with patch.object(preflight, "aws", side_effect=state_response) as api:
+            preflight.check_state_bucket("111122223333")
+        for call in api.call_args_list:
+            self.assertEqual(call.args[0], "s3api")
+            self.assertIn("--expected-bucket-owner", call.args)
+            self.assertEqual(call.args[-1], "111122223333")
+            self.assertTrue(call.args[1].startswith(("head-", "get-")))
+
+    def test_old_head_bucket_response_falls_back_to_location(self):
+        def response(service, operation, *args):
+            return {} if operation == "head-bucket" else state_response(service, operation, *args)
+        with patch.object(preflight, "aws", side_effect=response) as api:
+            preflight.check_state_bucket("111122223333")
+        self.assertIn("get-bucket-location", [call.args[1] for call in api.call_args_list])
+
+    def test_wrong_region_disabled_versioning_public_access_and_missing_encryption_stop(self):
+        failures = (("head-bucket", {"BucketRegion": "us-east-1"}),
+                    ("get-bucket-versioning", {"Status": "Suspended"}),
+                    ("get-public-access-block", {"PublicAccessBlockConfiguration": {"BlockPublicAcls": True}}),
+                    ("get-bucket-encryption", {}))
+        for operation, value in failures:
+            def response(service, action, *args):
+                return value if action == operation else state_response(service, action, *args)
+            with self.subTest(operation=operation), patch.object(preflight, "aws", side_effect=response), self.assertRaises(ValueError):
+                preflight.check_state_bucket("111122223333")
+
+    def test_access_denied_is_not_ignored(self):
+        error = subprocess.CalledProcessError(254, ["aws"], stderr="An error occurred (AccessDenied)")
+        with patch.object(preflight, "aws", side_effect=error), self.assertRaisesRegex(ValueError, "ownership"):
+            preflight.check_state_bucket("111122223333")
+
+
+class WorkerOfferingTests(unittest.TestCase):
+    def test_each_selected_type_must_be_offered_in_each_selected_az(self):
+        offers = [{"InstanceType": instance, "LocationType": "availability-zone", "Location": zone}
+                  for instance, zones in preflight.WORKER_OFFERINGS.items() for zone in zones]
+        with patch.object(preflight, "aws", return_value={"InstanceTypeOfferings": offers}):
+            preflight.check_worker_offerings()
+        for missing in range(len(offers)):
+            with self.subTest(missing=offers[missing]), patch.object(preflight, "aws", return_value={
+                    "InstanceTypeOfferings": offers[:missing] + offers[missing + 1:]}), self.assertRaisesRegex(ValueError, "offering is unavailable"):
+                preflight.check_worker_offerings()
 
 
 def search_limits():

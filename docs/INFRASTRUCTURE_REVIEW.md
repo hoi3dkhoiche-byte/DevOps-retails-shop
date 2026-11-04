@@ -2,6 +2,8 @@
 
 Ngày kiểm tra: 03/11/2026. Kết quả bên dưới đối chiếu code, kiểm tra Docker Hub read-only và chạy backend fixture cô lập trên máy; không phải biên bản triển khai AWS.
 
+Đợt hoàn thiện Terraform tiếp theo đã bổ sung input/IAM/state/AZ preflight, runner có Lease/timeout/report, policy IAM chia phần và artifact outputs. Đạt 76 test Python, 20 test Terraform giả lập và actionlint. Hướng dẫn vận hành account mới ở [AWS_FIRST_DEPLOYMENT.md](AWS_FIRST_DEPLOYMENT.md); chưa chạy AWS thật.
+
 ## Bổ sung mục 8–10 sau commit `7da3973`
 
 | Mục đánh giá | Kết luận hiện tại | Xử lý |

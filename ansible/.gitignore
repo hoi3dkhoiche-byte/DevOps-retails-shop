@@ -1,0 +1,6 @@
+.collections/
+.ansible/
+.cache/
+.cache-resolution.json
+.venv/
+inventory/operator.yml

@@ -4,7 +4,7 @@ import json
 import os
 from pathlib import Path
 
-ALLOWED = {"admin_cidrs", "admin_role_arn", "addon_versions", "platform_secret_arns", "domain", "hosted_zone_id", "mysql_instance_class", "mysql_multi_az", "github_oidc_provider_arn", "terraform_policy_arn", "create_opensearch_service_linked_role"}
+ALLOWED = {"admin_cidrs", "admin_role_arn", "addon_versions", "platform_secret_arns", "domain", "hosted_zone_id", "mysql_instance_class", "mysql_multi_az", "github_oidc_provider_arn", "terraform_policy_arn", "terraform_additional_policy_arns", "create_opensearch_service_linked_role"}
 
 config = json.loads(os.environ["TFVARS_JSON"])
 if not isinstance(config, dict) or set(config) - ALLOWED:

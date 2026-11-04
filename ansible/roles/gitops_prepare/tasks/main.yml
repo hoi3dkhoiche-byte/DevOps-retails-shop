@@ -1,0 +1,41 @@
+---
+- name: Require explicit execution and a boolean candidate activation switch
+  ansible.builtin.assert:
+    that:
+      - not ansible_check_mode
+      - retail_activate_candidate | default(false) is boolean
+    fail_msg: Use a boolean retail_activate_candidate and run without --check to write a local candidate.
+
+- name: Render and verify an isolated GitOps candidate
+  ansible.builtin.command:
+    argv: >-
+      {{ [ansible_playbook_python, retail_source_dir + '/ansible/helpers/prepare_candidate.py',
+          '--source-dir', retail_source_dir, '--gitops-dir', retail_gitops_dir,
+          '--local-dir', retail_local_dir, '--candidate-dir', retail_candidate_dir,
+          '--terraform-output', retail_terraform_output]
+         + (['--activate'] if (retail_activate_candidate | default(false) | bool) else []) }}
+    chdir: "{{ retail_source_dir }}"
+  environment: "{{ retail_aws_environment }}"
+  register: gitops_prepare_gitops_candidate_command
+  failed_when: false
+  changed_when: (gitops_prepare_gitops_candidate_command.stdout | from_json).changed | default(false) | bool
+  no_log: true
+
+- name: Record the verified local GitOps candidate
+  ansible.builtin.set_fact:
+    gitops_prepare_gitops_candidate: "{{ gitops_prepare_gitops_candidate_command.stdout | from_json }}"
+
+- name: Require successful preparation before presenting a candidate
+  ansible.builtin.assert:
+    that:
+      - gitops_prepare_gitops_candidate_command.rc | int == 0
+      - gitops_prepare_gitops_candidate.status == 'prepared'
+    fail_msg: "{{ gitops_prepare_gitops_candidate.error | default('GitOps preparation failed; inspect the local helper') }}"
+
+- name: Explain the GitOps candidate result
+  ansible.builtin.debug:
+    msg: >-
+      GitOps candidate: {{ gitops_prepare_gitops_candidate.candidate_dir }}.
+      deployment.enabled={{ gitops_prepare_gitops_candidate.deployment_enabled | bool }}.
+      Review this local copy before publishing any GitOps changes.
+      No active checkout, remote repository or Kubernetes resource was changed.

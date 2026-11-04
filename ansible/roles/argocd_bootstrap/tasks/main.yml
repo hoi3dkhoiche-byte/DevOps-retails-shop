@@ -1,0 +1,289 @@
+---
+- name: Check that prepared GitOps values are activated
+  ansible.builtin.command:
+    argv:
+      - "{{ ansible_playbook_python }}"
+      - "{{ retail_gitops_dir }}/scripts/prepare.py"
+      - --check
+  changed_when: false
+
+- name: Validate local GitOps bootstrap contract
+  ansible.builtin.command:
+    argv:
+      - "{{ ansible_playbook_python }}"
+      - "{{ retail_source_dir }}/ansible/helpers/bootstrap_guard.py"
+      - --gitops-dir
+      - "{{ retail_gitops_dir }}"
+      - --account-id
+      - "{{ retail_account_id }}"
+      - --region
+      - "{{ retail_region }}"
+      - --cluster-name
+      - "{{ retail_cluster_name }}"
+  register: argocd_bootstrap_bootstrap_guard
+  changed_when: false
+
+- name: Load validated GitOps configuration and pins
+  ansible.builtin.set_fact:
+    argocd_bootstrap_bootstrap_contract: "{{ argocd_bootstrap_bootstrap_guard.stdout | from_json }}"
+    argocd_bootstrap_gitops_config: "{{ (argocd_bootstrap_bootstrap_guard.stdout | from_json).config }}"
+    argocd_bootstrap_gitops_versions: "{{ (argocd_bootstrap_bootstrap_guard.stdout | from_json).versions }}"
+
+- name: Read the selected kubeconfig endpoint
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig
+      - "{{ retail_kubeconfig }}"
+      - --context
+      - "{{ retail_kube_context }}"
+      - config
+      - view
+      - --minify
+      - -o
+      - json
+  register: argocd_bootstrap_bootstrap_kubeconfig
+  changed_when: false
+
+- name: Refuse a kubeconfig pointing outside the checked cluster
+  ansible.builtin.assert:
+    that:
+      - (argocd_bootstrap_bootstrap_kubeconfig.stdout | from_json).clusters | length == 1
+      - (argocd_bootstrap_bootstrap_kubeconfig.stdout | from_json).clusters[0].cluster.server == retail_target.cluster_endpoint
+    fail_msg: The selected kubeconfig endpoint does not match the EKS cluster checked by preflight.
+
+- name: Check Kubernetes bootstrap authorization
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig
+      - "{{ retail_kubeconfig }}"
+      - --context
+      - "{{ retail_kube_context }}"
+      - --request-timeout=30s
+      - auth
+      - can-i
+      - '*'
+      - '*'
+      - --all-namespaces
+  environment: "{{ retail_aws_environment }}"
+  register: argocd_bootstrap_bootstrap_authorization
+  changed_when: false
+  failed_when: argocd_bootstrap_bootstrap_authorization.rc != 0 or argocd_bootstrap_bootstrap_authorization.stdout | trim != 'yes'
+
+- name: Check whether Argo CD Application resources exist
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ retail_kubeconfig }}"
+    context: "{{ retail_kube_context }}"
+    api_version: apiextensions.k8s.io/v1
+    kind: CustomResourceDefinition
+    name: applications.argoproj.io
+  environment: "{{ retail_aws_environment }}"
+  register: argocd_bootstrap_argocd_crd
+
+- name: Read an existing root Application
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ retail_kubeconfig }}"
+    context: "{{ retail_kube_context }}"
+    api_version: argoproj.io/v1alpha1
+    kind: Application
+    namespace: argocd
+    name: retail-root
+  environment: "{{ retail_aws_environment }}"
+  register: argocd_bootstrap_existing_root
+  when: argocd_bootstrap_argocd_crd.resources | length > 0
+
+- name: Read the ESO Application before deciding release ownership
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ retail_kubeconfig }}"
+    context: "{{ retail_kube_context }}"
+    api_version: argoproj.io/v1alpha1
+    kind: Application
+    namespace: argocd
+    name: external-secrets
+  environment: "{{ retail_aws_environment }}"
+  register: argocd_bootstrap_existing_eso_application
+  when: argocd_bootstrap_argocd_crd.resources | length > 0
+
+- name: Record whether Argo CD already owns the platform
+  ansible.builtin.set_fact:
+    argocd_bootstrap_argocd_manages_eso: "{{ argocd_bootstrap_existing_root.resources | default([]) | length > 0 }}"
+
+- name: Refuse competing ownership or an unhealthy existing root
+  ansible.builtin.assert:
+    that:
+      - argocd_bootstrap_argocd_manages_eso or argocd_bootstrap_existing_eso_application.resources | default([]) | length == 0
+      - >-
+        not argocd_bootstrap_argocd_manages_eso or
+        argocd_bootstrap_existing_root.resources[0].spec.source == argocd_bootstrap_bootstrap_contract.root.spec.source
+      - not argocd_bootstrap_argocd_manages_eso or argocd_bootstrap_existing_root.resources[0].spec.sources is not defined
+      - not argocd_bootstrap_argocd_manages_eso or argocd_bootstrap_existing_root.resources[0].spec.project == 'default'
+      - >-
+        not argocd_bootstrap_argocd_manages_eso or
+        argocd_bootstrap_existing_root.resources[0].spec.destination == argocd_bootstrap_bootstrap_contract.root.spec.destination
+      - not argocd_bootstrap_argocd_manages_eso or argocd_bootstrap_existing_root.resources[0].status.sync.status | default('') == 'Synced'
+      - not argocd_bootstrap_argocd_manages_eso or argocd_bootstrap_existing_root.resources[0].status.health.status | default('') == 'Healthy'
+      - not argocd_bootstrap_argocd_manages_eso or argocd_bootstrap_existing_eso_application.resources | default([]) | length == 1
+    fail_msg: Existing Argo CD resources differ or are unhealthy. Reconcile them through GitOps before rerunning bootstrap.
+
+- name: Verify ESO ownership and configured chart pin after handoff
+  ansible.builtin.assert:
+    that:
+      - argocd_bootstrap_existing_eso_application.resources[0].spec.project == 'retail-platform'
+      - argocd_bootstrap_existing_eso_application.resources[0].spec.sources == argocd_bootstrap_bootstrap_contract.eso_sources
+      - argocd_bootstrap_existing_eso_application.resources[0].spec.destination == {'server':'https://kubernetes.default.svc','namespace':'external-secrets'}
+      - >-
+        argocd_bootstrap_existing_eso_application.resources[0].metadata.labels['app.kubernetes.io/instance'] | default('') == 'retail-root'
+        or argocd_bootstrap_existing_eso_application.resources[0].metadata.annotations['argocd.argoproj.io/tracking-id'] | default('')
+        is match('^retail-root:argoproj.io/Application:argocd/external-secrets$')
+      - argocd_bootstrap_existing_eso_application.resources[0].status.sync.status | default('') == 'Synced'
+      - argocd_bootstrap_existing_eso_application.resources[0].status.health.status | default('') == 'Healthy'
+    fail_msg: ESO is owned by Argo CD; reconcile its pinned version/configuration through GitOps instead of Helm.
+  when: argocd_bootstrap_argocd_manages_eso
+
+- name: Bootstrap ESO at the GitOps chart pin before installing Argo CD
+  kubernetes.core.helm:
+    kubeconfig: "{{ retail_kubeconfig }}"
+    context: "{{ retail_kube_context }}"
+    name: external-secrets
+    chart_ref: external-secrets
+    chart_repo_url: "{{ argocd_bootstrap_bootstrap_contract.charts['external-secrets'].repository }}"
+    chart_version: "{{ argocd_bootstrap_bootstrap_contract.charts['external-secrets'].version }}"
+    release_namespace: external-secrets
+    create_namespace: true
+    values_files:
+      - "{{ argocd_bootstrap_bootstrap_contract.charts['external-secrets'].values_file }}"
+    wait: true
+    timeout: 15m
+  environment: "{{ retail_aws_environment }}"
+  when: not argocd_bootstrap_argocd_manages_eso
+
+- name: Wait for the ESO ExternalSecret CRD to become established
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ retail_kubeconfig }}"
+    context: "{{ retail_kube_context }}"
+    api_version: apiextensions.k8s.io/v1
+    kind: CustomResourceDefinition
+    name: externalsecrets.external-secrets.io
+    wait: true
+    wait_condition:
+      type: Established
+      status: 'True'
+    wait_timeout: 180
+  environment: "{{ retail_aws_environment }}"
+
+- name: Verify live ESO deployments are ready at the pinned chart version
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ retail_kubeconfig }}"
+    context: "{{ retail_kube_context }}"
+    api_version: apps/v1
+    kind: Deployment
+    namespace: external-secrets
+    label_selectors:
+      - app.kubernetes.io/instance=external-secrets
+  environment: "{{ retail_aws_environment }}"
+  register: argocd_bootstrap_eso_deployments
+  until: >-
+    argocd_bootstrap_eso_deployments.resources | length >= 3 and
+    argocd_bootstrap_eso_deployments.resources | selectattr('status.availableReplicas', 'defined') | list | length
+    == argocd_bootstrap_eso_deployments.resources | length and
+    argocd_bootstrap_eso_deployments.resources | selectattr('status.unavailableReplicas', 'defined') | map(attribute='status.unavailableReplicas') | sum == 0
+  retries: 60
+  delay: 5
+
+- name: Assert the running ESO deployment chart label matches GitOps
+  ansible.builtin.assert:
+    that:
+      - item.metadata.labels['helm.sh/chart'] == 'external-secrets-' ~ argocd_bootstrap_bootstrap_contract.charts['external-secrets'].version
+      - item.status.availableReplicas | default(0) == item.spec.replicas | default(1)
+      - item.status.observedGeneration | default(0) >= item.metadata.generation
+  loop: "{{ argocd_bootstrap_eso_deployments.resources }}"
+  loop_control:
+    label: "{{ item.metadata.name }}"
+
+- name: Render the GitOps credential references locally
+  ansible.builtin.command:
+    argv:
+      - helm
+      - template
+      - retail-argocd-secrets
+      - "{{ retail_gitops_dir }}/argocd-secrets"
+      - --namespace
+      - argocd
+      - -f
+      - "{{ retail_gitops_dir }}/config.yaml"
+  register: argocd_bootstrap_argocd_secret_manifests
+  changed_when: false
+
+- name: Require rendered credential references before applying
+  ansible.builtin.assert:
+    that:
+      - argocd_bootstrap_argocd_secret_manifests.stdout | trim | length > 0
+      - argocd_bootstrap_argocd_secret_manifests.stdout | from_yaml_all | reject('equalto', None) | list | length >= 5
+
+- name: Bootstrap credential references before Argo CD owns them
+  kubernetes.core.k8s:
+    kubeconfig: "{{ retail_kubeconfig }}"
+    context: "{{ retail_kube_context }}"
+    state: present
+    definition: "{{ argocd_bootstrap_argocd_secret_manifests.stdout | from_yaml_all | reject('equalto', None) | list }}"
+  environment: "{{ retail_aws_environment }}"
+  when: not argocd_bootstrap_argocd_manages_eso
+
+- name: Wait for Argo CD credentials to be synchronized from Secrets Manager
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ retail_kubeconfig }}"
+    context: "{{ retail_kube_context }}"
+    api_version: external-secrets.io/v1
+    kind: ExternalSecret
+    namespace: argocd
+    name: "{{ item }}"
+    wait: true
+    wait_condition:
+      type: Ready
+      status: 'True'
+    wait_timeout: 300
+  environment: "{{ retail_aws_environment }}"
+  loop: "{{ argocd_bootstrap_bootstrap_contract.expected_external_secrets }}"
+  register: argocd_bootstrap_bootstrap_external_secrets
+
+- name: Require every expected Argo CD ExternalSecret to exist and be Ready
+  ansible.builtin.assert:
+    that:
+      - item.resources | length == 1
+      - >-
+        item.resources[0].status.conditions | default([]) | selectattr('type', 'equalto', 'Ready')
+        | selectattr('status', 'equalto', 'True') | list | length == 1
+  loop: "{{ argocd_bootstrap_bootstrap_external_secrets.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Install the operator-owned Argo CD chart at the GitOps pin
+  kubernetes.core.helm:
+    kubeconfig: "{{ retail_kubeconfig }}"
+    context: "{{ retail_kube_context }}"
+    name: argocd
+    chart_ref: argo-cd
+    chart_repo_url: "{{ argocd_bootstrap_bootstrap_contract.charts['argo-cd'].repository }}"
+    chart_version: "{{ argocd_bootstrap_bootstrap_contract.charts['argo-cd'].version }}"
+    release_namespace: argocd
+    create_namespace: true
+    values_files:
+      - "{{ argocd_bootstrap_bootstrap_contract.charts['argo-cd'].values_file }}"
+    wait: true
+    timeout: 15m
+  environment: "{{ retail_aws_environment }}"
+
+- name: Apply the validated root Application
+  kubernetes.core.k8s:
+    kubeconfig: "{{ retail_kubeconfig }}"
+    context: "{{ retail_kube_context }}"
+    state: present
+    definition: "{{ argocd_bootstrap_bootstrap_contract.root }}"
+  environment: "{{ retail_aws_environment }}"
+
+- name: Explain Argo CD ownership after bootstrap
+  ansible.builtin.debug:
+    msg: >-
+      Argo CD owns the root's ESO/platform/credential Applications.
+      Argo CD itself remains an operator-owned Helm release. Run verify.yml after synchronization.

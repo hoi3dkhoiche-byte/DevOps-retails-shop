@@ -1,0 +1,9 @@
+---
+- name: Prepare an isolated GitOps candidate using verified deployment outputs
+  hosts: localhost
+  gather_facts: false
+  vars:
+    retail_preflight_phase: cluster
+  roles:
+    - role: preflight
+    - role: gitops_prepare

@@ -7,10 +7,10 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: Plan first; review the artifact before a separate apply run
+        description: Validate without AWS first; review a plan before a separate apply run
         type: choice
-        options: [plan, apply]
-        default: plan
+        options: [validate, plan, apply]
+        default: validate
         required: true
       plan_run_id:
         description: Successful plan workflow run ID, required for apply
@@ -151,3 +151,14 @@ jobs:
           aws-region: ap-southeast-1
       - run: terraform -chdir=infra/retail-lab init -input=false -lockfile=readonly
       - run: terraform -chdir=infra/retail-lab apply -input=false -lock-timeout=300s reviewed-plan/terraform.tfplan
+      - name: Export allowlisted deployment metadata for bootstrap
+        run: |
+          umask 077
+          terraform -chdir=infra/retail-lab output -json > "$RUNNER_TEMP/retail-all-outputs.json"
+          python3 scripts/infra/export_outputs.py --input "$RUNNER_TEMP/retail-all-outputs.json" --output infra/retail-lab/deployment-context/terraform-outputs.json --metadata-output infra/retail-lab/deployment-context/metadata.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: deployment-context-${{ github.run_id }}-${{ github.run_attempt }}
+          path: infra/retail-lab/deployment-context/
+          if-no-files-found: error
+          retention-days: 7

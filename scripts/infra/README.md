@@ -6,6 +6,8 @@ The target is Singapore, EKS 1.36, three AZs and management/dev/prod node groups
 
 ## Before the first deployment
 
+For an account that has not been configured yet, start with [AWS first deployment](../../docs/AWS_FIRST_DEPLOYMENT.md). It uses CloudShell for the one-time account bootstrap and does not require sending access keys to the agent. `render_terraform_policy.py` renders the reviewed policy template into IAM-size-limited parts plus the fixed source/main OIDC trust; primary/additional policy ARNs come from its manifest. The template is privileged infrastructure automation, not application CI, and still requires account-side IAM validation/review before attaching it.
+
 1. The operator must already own `s3://manhnguyen1131`. Enable bucket Versioning and Block Public Access before initializing the backend. State uses encryption and S3 native lock files; do not configure a state-expiration lifecycle rule.
 2. Create or reuse the account's GitHub OIDC provider and create `retail-lab-terraform` with the trust below. Attach a reviewed policy for the AWS resource types in this module, including S3 state/lock access and Secrets Manager dynamic-reference resolution by CloudFormation. Set the role's maximum session duration to 7200 seconds. Application CI does not receive this role or an EKS Access Entry.
 3. Install the locked bootstrap tools in a virtual environment: `python -m pip install --require-hashes -r scripts/infra/requirements.txt`. Run `python scripts/infra/bootstrap_backends.py init-platform` using the operator AWS profile. It creates/reuses four platform administrator/Redis credentials and writes **ARNs only** to `.ci-tools/platform-secret-arns.json`; it prints no password.
@@ -27,9 +29,13 @@ The OIDC role trust subject is exactly `repo:hoi3dkhoiche-byte/DevOps-retails-sh
 
 ## Workflow inputs and review
 
-Set repository Variables `TERRAFORM_ROLE_ARN` and `TERRAFORM_TFVARS_JSON`. The latter is the JSON equivalent of the documented tfvars and contains configuration/ARNs only. Credential values are rejected by the input-key allowlist and belong in Secrets Manager.
+Set repository Variables `TERRAFORM_ROLE_ARN` and `TERRAFORM_TFVARS_JSON`. The latter is the JSON equivalent of the documented tfvars and contains configuration/ARNs only, including optional `terraform_additional_policy_arns` for policy parts beyond the primary ARN. Credential values are rejected by the input-key allowlist and belong in Secrets Manager.
 
 PRs run formatting, provider validation and offline contract tests with no AWS credentials. From `main`, manually run **Retail Terraform** with `operation=plan`. Read the `terraform-plan.txt` artifact and copy the job summary's plan run ID, attempt and SHA256. Start a separate manual **apply** run with those three values. Apply verifies the successful plan workflow, source SHA, attempt, age (24 hours) and binary-plan checksum before AWS login. A changed main commit, rerun, expired plan or mismatched checksum requires a fresh plan. Apply uses the saved plan; it does not silently create another plan.
+
+Manual `operation=validate` is now the default and runs without AWS credentials; it skips plan/apply. This lets a new account verify the code before OIDC is configured. Preflight checks the actual caller account, real public IPv4 administration `/32`, existing admin role/OIDC/policy metadata, state owner/region/versioning/public-access/encryption and selected EC2 types by AZ before checking engine/add-on compatibility. IAM read metadata must allow `iam:GetRole`, `iam:GetOpenIDConnectProvider`, `iam:GetPolicy`, the documented S3 metadata APIs and `ec2:DescribeInstanceTypeOfferings`. These reads cannot prove live state-lock write/delete permissions; the real plan must acquire and release the lock.
+
+After a successful apply, download artifact `deployment-context-<run>-<attempt>`. It contains only allowlisted native Terraform outputs and a checksum/source/run receipt. `export_outputs.py` rejects sensitive outputs and credential fields/URLs; raw state, plans and kubeconfig are not included in this artifact. The raw output temporary file remains runner-local. This artifact is the handoff to backend bootstrap and GitOps preparation; it does not assert that those steps have run.
 
 `preflight.py` reads Singapore availability for EKS/add-ons, MySQL 8.4.11 and its instance class, Redis OSS 7.1, Amazon MQ 4.2 cluster mode and OpenSearch 3.3. It checks platform credential **metadata** and existing state-bucket access, without retrieving passwords. The exact versions and offered capacity must still pass this regional check when deployment occurs.
 
@@ -46,7 +52,7 @@ The external reviewed Terraform IAM policy must also cover the new endpoint life
 After Terraform apply, export `terraform -chdir=infra/retail-lab output -json` to a local JSON file. Its outputs contain endpoints and secret/role ARNs, not password values. Configure the operator's kubectl context for `retail-lab-eks`, then run:
 
 ```powershell
-python scripts/infra/run_bootstrap.py --terraform-output .ci-tools/terraform-output.json --context <explicit-retail-context>
+python scripts/infra/run_bootstrap.py --terraform-output .ci-tools/terraform-output.json --context <explicit-retail-context> --kubeconfig .ci-tools/retail-kubeconfig.yaml --report .ci-tools/backend-bootstrap-report.json
 ```
 
 The helper checks the API endpoint against Terraform outputs before creating a short-lived Job on management. The Job authenticates with the dedicated `retail-ops:backend-bootstrap` IRSA role, uses the official RDS CA with hostname/certificate verification, and:
@@ -55,6 +61,10 @@ The helper checks the API endpoint against Terraform outputs before creating a s
 - Creates `retail-dev`/`retail-prod` RabbitMQ vhosts and Orders users with permissions limited to the declared exchanges and queues.
 - Creates OpenSearch users and roles restricted to `products-dev` or `products-prod`.
 - Stores Redis TLS URLs, application credentials, Grafana login and Argo CD credentials directly in the existing Secrets Manager containers.
+
+Inputs accept Windows UTF-8 BOM. Only required non-secret endpoint/ARN metadata is forwarded into the Job ConfigMap. Every kubectl call has a bounded timeout and explicit context; `--kubeconfig` selects a separate file without editing the user's default. Job names include a unique suffix. The runner stops promptly on Failed, observes its deadline and writes a schema-versioned JSON report with phase/status/error code and actual mutation activity; raw SDK/kubectl messages and credential values are not copied into reports.
+
+An account-scoped Lease `backend-bootstrap-<account-id>` in `retail-ops` prevents overlapping bootstrap Jobs. A held or expired lease is not stolen automatically: a Job can still be writing after its launcher disappears. On failure the runner attempts to stop only its own labelled Job and releases its lease only after terminal/absent confirmation; otherwise the report marks the lease retained. To recover, inspect the holder Job/Pods in the explicit target context, confirm no bootstrap process can still write, then clear that specific lease as an operator. Do not delete all leases or rerun around the lock. Failed Job/Pod evidence remains until its one-hour TTL; inspect logs in that interval. Successful cleanup removes only the current ConfigMap.
 
 Orders needs configure/read/write on exactly `orders.events`, `orders.dlx`, `orders.events.v2` and `orders.events.dlq`: AMQP queue bindings read the source exchange and write the destination queue. Catalog's role allows the cluster-level bulk dispatch action plus index-level operations restricted to `products-dev` or `products-prod`. Run backend bootstrap again after deploying these permission changes so existing backend users/roles are updated; changing this Python file alone does not change credentials/permissions already deployed in AWS.
 
@@ -76,7 +86,7 @@ This is a fresh target root. If upstream Terraform already owns deployed workloa
 
 Default one-worker environments and one-AZ monitoring PVCs do not establish application HA. Management stays in AZ-A while its retained gp3 PVCs exist there. RabbitMQ's three-AZ cluster and quorum queues are separately configured for messaging durability. RDS backup retention is seven days and Redis snapshot retention seven days; perform actual restore/failover tests before claiming the design RPO/RTO.
 
-Validation includes Terraform `fmt`/`validate`, six native mocked-provider Terraform tests and Python contract tests. The native tests include a mocked apply proving only the Argo CD ESO reader can access the repository credential container, while the backend initialization Job is excluded. Mocked providers make no AWS calls. The Terraform workflow's validation gate also starts disposable RabbitMQ 4.2.0 and security-enabled OpenSearch 3.3.0 fixtures, proves the old permissions fail, then verifies the fixed users can bind/publish/consume/dead-letter and bulk/search without crossing environments. It installs only the hash-pinned AMQP test dependency from `requirements-permissions.txt`. These checks do not provision AWS, prove engine capacity, validate all CloudFormation service-side constraints or demonstrate recovery time.
+Validation includes Terraform `fmt`/`validate`, native mocked-provider Terraform tests for input/runtime prerequisites and Python contract tests. The native tests include a mocked apply proving only the Argo CD ESO reader can access the repository credential container, while the backend initialization Job is excluded. Mocked providers make no AWS calls. The Terraform workflow's validation gate also starts disposable RabbitMQ 4.2.0 and security-enabled OpenSearch 3.3.0 fixtures, proves the old permissions fail, then verifies the fixed users can bind/publish/consume/dead-letter and bulk/search without crossing environments. It installs only the hash-pinned AMQP test dependency from `requirements-permissions.txt`. These checks do not provision AWS, prove engine capacity, validate all CloudFormation service-side constraints or demonstrate recovery time.
 
 The OpenSearch demo fixture also grants `own_index` to every user by default, which can conceal a missing cluster bulk action through inherited permissions. The probe removes only that wildcard mapping in the disposable fixture and checks the effective Catalog role before testing. It does not modify global role mappings on AWS; the production bootstrap role now declares the bulk action explicitly and does not rely on demo defaults.
 

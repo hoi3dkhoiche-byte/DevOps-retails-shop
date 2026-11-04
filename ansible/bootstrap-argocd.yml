@@ -1,0 +1,10 @@
+---
+- name: Bootstrap ESO and Argo CD from reviewed GitOps configuration
+  hosts: localhost
+  gather_facts: false
+  vars:
+    retail_preflight_phase: cluster
+  roles:
+    - role: preflight
+    - role: configure_context
+    - role: argocd_bootstrap

@@ -6,4 +6,5 @@
 *.tfvars.json
 !*.tfvars.example
 reviewed-plan/
+deployment-context/
 crash.log

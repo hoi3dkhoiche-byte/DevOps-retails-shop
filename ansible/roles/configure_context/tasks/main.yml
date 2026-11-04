@@ -1,0 +1,77 @@
+---
+- name: Require a live target check before writing kubeconfig
+  ansible.builtin.assert:
+    that:
+      - retail_target.phase == 'cluster'
+      - retail_target.cluster_endpoint is match('^https://')
+      - not ansible_check_mode
+    fail_msg: Run this play normally with verified deployment outputs; --check cannot bootstrap kubeconfig.
+
+- name: Create the operator's private local working directory
+  ansible.builtin.file:
+    path: "{{ retail_local_dir }}"
+    state: directory
+    mode: "0700"
+
+- name: Read the existing dedicated kubeconfig checksum
+  ansible.builtin.stat:
+    path: "{{ retail_kubeconfig }}"
+    checksum_algorithm: sha256
+  register: configure_context_kubeconfig_before
+
+- name: Write EKS exec authentication to the dedicated kubeconfig
+  ansible.builtin.command:
+    argv:
+      - aws
+      - eks
+      - update-kubeconfig
+      - --region
+      - "{{ retail_region }}"
+      - --name
+      - "{{ retail_cluster_name }}"
+      - --alias
+      - "{{ retail_kube_context }}"
+      - --kubeconfig
+      - "{{ retail_kubeconfig }}"
+  environment: "{{ retail_aws_environment }}"
+  register: configure_context_update_kubeconfig
+  # The following stat task reports actual file changes, including the first write.
+  changed_when: false
+
+- name: Restrict the dedicated kubeconfig to its owner
+  ansible.builtin.file:
+    path: "{{ retail_kubeconfig }}"
+    state: file
+    mode: "0600"
+
+- name: Read the resulting dedicated kubeconfig checksum
+  ansible.builtin.stat:
+    path: "{{ retail_kubeconfig }}"
+    checksum_algorithm: sha256
+  register: configure_context_kubeconfig_after
+  changed_when: >-
+    not configure_context_kubeconfig_before.stat.exists or
+    configure_context_kubeconfig_before.stat.checksum != configure_context_kubeconfig_after.stat.checksum
+
+- name: Read the configured cluster API endpoint
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig
+      - "{{ retail_kubeconfig }}"
+      - --context
+      - "{{ retail_kube_context }}"
+      - config
+      - view
+      - --minify
+      - -o
+      - jsonpath={.clusters[0].cluster.server}
+  environment: "{{ retail_aws_environment }}"
+  register: configure_context_context_endpoint
+  changed_when: false
+
+- name: Reject a kubeconfig that points to a different API endpoint
+  ansible.builtin.assert:
+    that:
+      - configure_context_context_endpoint.stdout | trim == retail_target.cluster_endpoint
+    fail_msg: The dedicated kubeconfig does not match the EKS API endpoint validated by preflight.

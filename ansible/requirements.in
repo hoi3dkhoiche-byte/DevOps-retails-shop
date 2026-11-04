@@ -1,0 +1,18 @@
+# Resolve on Linux/Python 3.12; requirements.txt contains the tested full lock.
+ansible-core==2.21.6
+ansible-lint==26.10.1
+kubernetes==36.0.3
+PyYAML==6.0.3
+# Keep the bootstrap runtime pins aligned with scripts/infra/requirements.txt.
+bcrypt==5.0.0
+boto3==1.43.121
+botocore==1.43.121
+cffi==2.1.1
+cryptography==50.0.2
+jmespath==1.1.0
+pycparser==3.12
+PyMySQL==1.2.3
+python-dateutil==2.9.0.post0
+s3transfer==0.19.3
+six==1.17.0
+urllib3==2.8.0

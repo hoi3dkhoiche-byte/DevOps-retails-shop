@@ -1,0 +1,85 @@
+---
+- name: Require an explicit execution for backend bootstrap
+  ansible.builtin.assert:
+    that:
+      - not ansible_check_mode
+    fail_msg: Backend bootstrap changes private backends; run without --check after reviewing the target.
+
+- name: Allocate a unique private backend operation report
+  ansible.builtin.tempfile:
+    state: file
+    path: "{{ retail_local_dir }}"
+    prefix: backend-bootstrap-
+    suffix: .json
+  register: backend_bootstrap_backend_report_path
+  changed_when: false
+
+- name: Record the backend operation report path
+  ansible.builtin.set_fact:
+    backend_bootstrap_backend_report_file: "{{ backend_bootstrap_backend_report_path.path }}"
+    backend_bootstrap_backend_runner_failed: false
+
+- name: Run backend bootstrap and retain a safe result on failure
+  block:
+    - name: Bootstrap private backends through the bounded EKS Job runner
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_playbook_python }}"
+          - "{{ retail_source_dir }}/scripts/infra/run_bootstrap.py"
+          - --terraform-output
+          - "{{ retail_terraform_output }}"
+          - --context
+          - "{{ retail_kube_context }}"
+          - --kubeconfig
+          - "{{ retail_kubeconfig }}"
+          - --timeout
+          - "{{ retail_backend_timeout | default(900) | string }}"
+          - --report
+          - "{{ backend_bootstrap_backend_report_file }}"
+        chdir: "{{ retail_source_dir }}"
+      environment: "{{ retail_aws_environment }}"
+      register: backend_bootstrap_backend_command
+      changed_when: (backend_bootstrap_backend_command.stdout | from_json).changed | bool
+      no_log: true
+  rescue:
+    - name: Preserve the runner failure while reading its safe operation report
+      ansible.builtin.set_fact:
+        backend_bootstrap_backend_runner_failed: true
+  always:
+    - name: Read the backend report without exposing subprocess output
+      ansible.builtin.slurp:
+        src: "{{ backend_bootstrap_backend_report_file }}"
+      register: backend_bootstrap_backend_report_content
+      no_log: true
+
+    - name: Decode the safe backend report or mark a missing runner report
+      ansible.builtin.set_fact:
+        backend_bootstrap_backend_report: >-
+          {{ (backend_bootstrap_backend_report_content.content | b64decode | from_json)
+             if (backend_bootstrap_backend_report_content.content | b64decode | trim | length > 0)
+             else {'schema_version': 1, 'status': 'failed', 'changed': false,
+                   'phase': 'controller', 'error_code': 'runner_report_unavailable'} }}
+      no_log: true
+
+- name: Report the bounded backend operation result
+  ansible.builtin.debug:
+    msg:
+      status: "{{ backend_bootstrap_backend_report.status | default('failed') }}"
+      phase: "{{ backend_bootstrap_backend_report.phase | default('unknown') }}"
+      changed: "{{ backend_bootstrap_backend_report.changed | default(false) | bool }}"
+      error_code: "{{ backend_bootstrap_backend_report.error_code | default('none') }}"
+      report: "{{ backend_bootstrap_backend_report_file }}"
+
+- name: Require a successful bootstrap for the expected AWS target
+  ansible.builtin.assert:
+    that:
+      - not backend_bootstrap_backend_runner_failed
+      - backend_bootstrap_backend_command.rc | default(1) | int == 0
+      - backend_bootstrap_backend_report.schema_version | default(0) | int == 1
+      - backend_bootstrap_backend_report.status | default('failed') == 'success'
+      - backend_bootstrap_backend_report.account_id | default('') | string == retail_account_id | string
+      - backend_bootstrap_backend_report.cluster_name | default('') == retail_cluster_name
+    fail_msg: >-
+      Backend bootstrap failed or could not confirm the expected target.
+      Review the safe JSON report at {{ backend_bootstrap_backend_report_file }}.
+      A retained lease requires inspection before retrying; do not delete it blindly.

@@ -1,10 +1,18 @@
 # Kế hoạch hoàn thiện Terraform và Ansible cho Retail AWS lab
 
-Ngày rà soát: 02/11/2026; cập nhật hoàn tất: 03/11/2026. Đây là kế hoạch viết và kiểm chứng code, chưa phải biên bản triển khai AWS.
+Ngày rà soát: 02/11/2026; cập nhật Ansible: 04/11/2026. Đây là kế hoạch viết và kiểm chứng code, chưa phải biên bản triển khai AWS.
 
 **Phương án chốt: giữ Terraform hiện có, bổ sung Ansible cho bootstrap và kiểm tra, tiếp tục dùng Argo CD để đồng bộ ứng dụng.** Một EKS và các backend dùng chung có một Terraform root/state; dev/prod tách bằng node group, namespace, database/user và values GitOps.
 
-Tiến độ cập nhật sau [đợt đối chiếu lỗi hạ tầng](INFRASTRUCTURE_REVIEW.md): đã sửa trạng thái API EKS, role OpenSearch, dependency NAT, thêm S3 Gateway Endpoint và sửa quyền RabbitMQ/bulk OpenSearch. Kiểm tra đạt 26 test Python, 5 test Terraform giả lập và 6 nhóm permission smoke trên backend thật trong fixture. Các mục khác của kế hoạch và phần Ansible vẫn là công việc tiếp theo; chưa triển khai AWS.
+Tiến độ sau [đợt đối chiếu lỗi hạ tầng](INFRASTRUCTURE_REVIEW.md): đã sửa trạng thái API EKS, role OpenSearch, dependency NAT, thêm S3 Gateway Endpoint và sửa quyền RabbitMQ/bulk OpenSearch. Đã kiểm chứng 6 nhóm permission smoke trên backend thật trong fixture; chưa triển khai AWS.
+
+**Cập nhật hoàn thiện Terraform trước Ansible:** đã thêm kiểm tra input/account/IAM/state bucket/AZ; runner hỗ trợ BOM, kubeconfig riêng, Complete/Failed/timeout, Lease chống chạy song song và báo cáo JSON; có policy renderer chia phần theo giới hạn IAM, chế độ workflow validate-only và artifact outputs đã allowlist. Kiểm tra mới đạt 76 test Python, 20 test Terraform giả lập và actionlint. Xem [hướng dẫn account AWS mới](AWS_FIRST_DEPLOYMENT.md). Bảng vấn đề dưới đây ghi căn cứ ban đầu, không phải mọi dòng đều còn chưa sửa.
+
+**Ansible đã được triển khai:** sáu playbook, inventory localhost, dependency lock, preflight account/cluster/receipt, kubeconfig riêng, backend Job runner, GitOps candidate cô lập, bootstrap ESO/Argo CD và verify readiness. Xem [runbook](../ansible/README.md). Workflow `Retail Ansible` chỉ kiểm tra offline, không tự provision AWS.
+
+Kiểm chứng Ansible ngày 04/11/2026: 55 test helper trên Linux đạt; syntax-check cả sáu playbook, preflight thực chạy offline changed=0, ansible-lint không lỗi/cảnh báo và workflow mới qua actionlint. Lockfile Python 3.12/Linux x86_64 đã được kiểm tra resolution với `--require-hashes --ignore-installed`.
+
+Chưa có AWS CLI/profile hoặc IAM/OIDC thật được nối trong phiên làm việc. IAM template đã đối chiếu tên action/resource-scope với metadata AWS công khai nhưng chưa chạy Access Analyzer trong account. Cần bootstrap account, live preflight, review plan và cold apply để nghiệm thu AWS. Redis node-type orderability mới chỉ kiểm tra được engine metadata trước khi có cluster; không suy thành bằng chứng capacity.
 
 ## 1. Căn cứ và hiện trạng
 
@@ -15,7 +23,7 @@ Tiến độ cập nhật sau [đợt đối chiếu lỗi hạ tầng](INFRASTR
 | [Workflow Terraform](../.github/workflows/terraform.yml) | Đã có validate, plan và apply saved plan riêng; kiểm tra commit/run/attempt/checksum/thời hạn |
 | [Backend helpers](../scripts/infra/) | Đã có khởi tạo credential nền, preflight, Job bootstrap backend trong VPC và test |
 | [GitOps đã publish](https://github.com/hoi3dkhoiche-byte/DevOps-retails-shop-gitops/tree/b241c004b3a45409cb8a38e80c4bfc4bd8c0c0af) | Đã có chart platform/app, metadata prepare, bootstrap ESO/Argo CD, digest dev; AWS deployment và prod release đang tắt |
-| Ansible | Chưa có thư mục/playbook trong source |
+| Ansible | Đã có sáu playbook và role/helper tại `ansible/`; kiểm chứng offline trên Linux, chưa chạy AWS thật |
 | Kiểm tra nền trong lần rà soát | 13 test hiện có của `scripts/infra` đạt; chưa chạy preflight bằng tài khoản AWS, Terraform plan/apply hay bootstrap thật |
 
 13 test hiện tại không phủ đầy đủ response API AWS: ví dụ test EKS đang giả lập `status` khác schema hiện hành. Cần bổ sung ca lỗi thực tế trước khi coi bootstrap sẵn sàng chạy.

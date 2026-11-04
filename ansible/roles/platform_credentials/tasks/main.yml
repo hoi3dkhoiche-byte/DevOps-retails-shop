@@ -1,0 +1,44 @@
+---
+- name: Require an explicit execution for platform credential initialization
+  ansible.builtin.assert:
+    that:
+      - not ansible_check_mode
+    fail_msg: Platform credential initialization changes AWS; run without --check after reviewing the target.
+
+- name: Create the private local artifact directory
+  ansible.builtin.file:
+    path: "{{ retail_local_dir }}"
+    state: directory
+    mode: "0700"
+
+- name: Create or reuse platform credentials in Secrets Manager
+  ansible.builtin.command:
+    argv:
+      - "{{ ansible_playbook_python }}"
+      - "{{ retail_source_dir }}/scripts/infra/bootstrap_backends.py"
+      - init-platform
+      - --arn-output
+      - "{{ retail_local_dir }}/platform-secret-arns.json"
+    chdir: "{{ retail_source_dir }}"
+  environment: "{{ retail_aws_environment }}"
+  register: platform_credentials_platform_credentials_command
+  # The existing bootstrap API does not report whether a secret was created.
+  # Report the operation honestly instead of pretending this AWS write is read-only.
+  changed_when: true
+  no_log: true
+
+- name: Restrict local platform ARN output permissions
+  ansible.builtin.file:
+    path: "{{ retail_local_dir }}/platform-secret-arns.json"
+    mode: "0600"
+
+- name: Record the non-secret platform ARN output path
+  ansible.builtin.set_fact:
+    platform_credentials_platform_arns_path: "{{ retail_local_dir }}/platform-secret-arns.json"
+
+- name: Explain the platform credential operation
+  ansible.builtin.debug:
+    msg: >-
+      Platform credentials were created or reused without rotation.
+      Only secret ARNs were written to {{ platform_credentials_platform_arns_path }};
+      credential values remain in AWS Secrets Manager.

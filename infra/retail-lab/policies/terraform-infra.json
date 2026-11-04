@@ -1,0 +1,604 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "CallerIdentity",
+      "Effect": "Allow",
+      "Action": [
+        "sts:GetCallerIdentity"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "StateBucketMetadata",
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket",
+        "s3:GetBucketLocation",
+        "s3:GetBucketVersioning",
+        "s3:GetBucketPublicAccessBlock",
+        "s3:GetEncryptionConfiguration"
+      ],
+      "Resource": "arn:aws:s3:::__STATE_BUCKET__"
+    },
+    {
+      "Sid": "StateObject",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject"
+      ],
+      "Resource": "arn:aws:s3:::__STATE_BUCKET__/retail/lab/terraform.tfstate"
+    },
+    {
+      "Sid": "StateLock",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": "arn:aws:s3:::__STATE_BUCKET__/retail/lab/terraform.tfstate.tflock"
+    },
+    {
+      "Sid": "RegionalReadMetadata",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:Describe*",
+        "eks:DescribeClusterVersions",
+        "eks:DescribeAddonVersions",
+        "eks:ListClusters",
+        "eks:ListAccessPolicies",
+        "rds:Describe*",
+        "mq:Describe*",
+        "mq:List*",
+        "elasticache:Describe*",
+        "elasticache:List*",
+        "es:ListVersions",
+        "es:ListInstanceTypeDetails",
+        "es:DescribeInstanceTypeLimits"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "__AWS_REGION__"
+        }
+      }
+    },
+    {
+      "Sid": "LabNetworkLifecycle",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateVpc",
+        "ec2:DeleteVpc",
+        "ec2:ModifyVpcAttribute",
+        "ec2:CreateSubnet",
+        "ec2:DeleteSubnet",
+        "ec2:ModifySubnetAttribute",
+        "ec2:CreateRouteTable",
+        "ec2:DeleteRouteTable",
+        "ec2:CreateRoute",
+        "ec2:DeleteRoute",
+        "ec2:ReplaceRoute",
+        "ec2:AssociateRouteTable",
+        "ec2:DisassociateRouteTable",
+        "ec2:ReplaceRouteTableAssociation",
+        "ec2:CreateInternetGateway",
+        "ec2:DeleteInternetGateway",
+        "ec2:AttachInternetGateway",
+        "ec2:DetachInternetGateway",
+        "ec2:AllocateAddress",
+        "ec2:ReleaseAddress",
+        "ec2:CreateNatGateway",
+        "ec2:DeleteNatGateway",
+        "ec2:CreateSecurityGroup",
+        "ec2:DeleteSecurityGroup",
+        "ec2:AuthorizeSecurityGroupIngress",
+        "ec2:AuthorizeSecurityGroupEgress",
+        "ec2:RevokeSecurityGroupIngress",
+        "ec2:RevokeSecurityGroupEgress",
+        "ec2:ModifySecurityGroupRules",
+        "ec2:CreateLaunchTemplate",
+        "ec2:DeleteLaunchTemplate",
+        "ec2:CreateLaunchTemplateVersion",
+        "ec2:DeleteLaunchTemplateVersions",
+        "ec2:ModifyLaunchTemplate",
+        "ec2:CreateVpcEndpoint",
+        "ec2:ModifyVpcEndpoint",
+        "ec2:DeleteVpcEndpoints",
+        "ec2:CreateTags",
+        "ec2:DeleteTags",
+        "ec2:CreateNetworkInterface",
+        "ec2:DeleteNetworkInterface",
+        "ec2:DetachNetworkInterface"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "__AWS_REGION__"
+        }
+      }
+    },
+    {
+      "Sid": "EksProject",
+      "Effect": "Allow",
+      "Action": [
+        "eks:*"
+      ],
+      "Resource": [
+        "arn:aws:eks:__AWS_REGION__:__AWS_ACCOUNT_ID__:cluster/retail-lab-eks",
+        "arn:aws:eks:__AWS_REGION__:__AWS_ACCOUNT_ID__:nodegroup/retail-lab-eks/*/*",
+        "arn:aws:eks:__AWS_REGION__:__AWS_ACCOUNT_ID__:addon/retail-lab-eks/*/*",
+        "arn:aws:eks:__AWS_REGION__:__AWS_ACCOUNT_ID__:access-entry/retail-lab-eks/*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "__AWS_REGION__"
+        }
+      }
+    },
+    {
+      "Sid": "RdsProject",
+      "Effect": "Allow",
+      "Action": [
+        "rds:CreateDBInstance",
+        "rds:ModifyDBInstance",
+        "rds:DeleteDBInstance",
+        "rds:CreateDBSubnetGroup",
+        "rds:ModifyDBSubnetGroup",
+        "rds:DeleteDBSubnetGroup",
+        "rds:CreateDBParameterGroup",
+        "rds:ModifyDBParameterGroup",
+        "rds:ResetDBParameterGroup",
+        "rds:DeleteDBParameterGroup",
+        "rds:AddTagsToResource",
+        "rds:RemoveTagsFromResource",
+        "rds:ListTagsForResource",
+        "rds:CreateDBSnapshot"
+      ],
+      "Resource": [
+        "arn:aws:rds:__AWS_REGION__:__AWS_ACCOUNT_ID__:db:retail-lab-mysql",
+        "arn:aws:rds:__AWS_REGION__:__AWS_ACCOUNT_ID__:subgrp:retail-lab-mysql",
+        "arn:aws:rds:__AWS_REGION__:__AWS_ACCOUNT_ID__:pg:retail-mysql84-*",
+        "arn:aws:rds:__AWS_REGION__:__AWS_ACCOUNT_ID__:snapshot:retail-lab-mysql-*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "__AWS_REGION__"
+        }
+      }
+    },
+    {
+      "Sid": "CfnProject",
+      "Effect": "Allow",
+      "Action": [
+        "cloudformation:CreateStack",
+        "cloudformation:UpdateStack",
+        "cloudformation:DeleteStack",
+        "cloudformation:DescribeStacks",
+        "cloudformation:DescribeStackEvents",
+        "cloudformation:DescribeStackResources",
+        "cloudformation:GetTemplate",
+        "cloudformation:ListStackResources"
+      ],
+      "Resource": "arn:aws:cloudformation:__AWS_REGION__:__AWS_ACCOUNT_ID__:stack/retail-lab-managed-backends/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "__AWS_REGION__"
+        }
+      }
+    },
+    {
+      "Sid": "CfnTemplateValidation",
+      "Effect": "Allow",
+      "Action": [
+        "cloudformation:ValidateTemplate"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "__AWS_REGION__"
+        }
+      }
+    },
+    {
+      "Sid": "MqProject",
+      "Effect": "Allow",
+      "Action": [
+        "mq:UpdateBroker",
+        "mq:DeleteBroker",
+        "mq:CreateTags",
+        "mq:DeleteTags"
+      ],
+      "Resource": "arn:aws:mq:__AWS_REGION__:__AWS_ACCOUNT_ID__:broker:retail-lab-rabbitmq:*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "__AWS_REGION__"
+        }
+      }
+    },
+    {
+      "Sid": "RedisProject",
+      "Effect": "Allow",
+      "Action": [
+        "elasticache:CreateReplicationGroup",
+        "elasticache:ModifyReplicationGroup",
+        "elasticache:DeleteReplicationGroup",
+        "elasticache:CreateCacheSubnetGroup",
+        "elasticache:ModifyCacheSubnetGroup",
+        "elasticache:DeleteCacheSubnetGroup",
+        "elasticache:CreateUser",
+        "elasticache:ModifyUser",
+        "elasticache:DeleteUser",
+        "elasticache:CreateUserGroup",
+        "elasticache:ModifyUserGroup",
+        "elasticache:DeleteUserGroup",
+        "elasticache:AddTagsToResource",
+        "elasticache:RemoveTagsFromResource"
+      ],
+      "Resource": [
+        "arn:aws:elasticache:__AWS_REGION__:__AWS_ACCOUNT_ID__:replicationgroup:retail-lab-redis",
+        "arn:aws:elasticache:__AWS_REGION__:__AWS_ACCOUNT_ID__:subnetgroup:*",
+        "arn:aws:elasticache:__AWS_REGION__:__AWS_ACCOUNT_ID__:user:retail-*",
+        "arn:aws:elasticache:__AWS_REGION__:__AWS_ACCOUNT_ID__:usergroup:retail-checkout"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "__AWS_REGION__"
+        }
+      }
+    },
+    {
+      "Sid": "SearchProject",
+      "Effect": "Allow",
+      "Action": [
+        "es:CreateDomain",
+        "es:UpdateDomainConfig",
+        "es:DeleteDomain",
+        "es:DescribeDomain",
+        "es:DescribeDomainConfig",
+        "es:DescribeDomainChangeProgress",
+        "es:DescribeDryRunProgress",
+        "es:AddTags",
+        "es:RemoveTags",
+        "es:ListTags"
+      ],
+      "Resource": "arn:aws:es:__AWS_REGION__:__AWS_ACCOUNT_ID__:domain/retail-lab-search",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "__AWS_REGION__"
+        }
+      }
+    },
+    {
+      "Sid": "ProjectSecretsMetadata",
+      "Effect": "Allow",
+      "Action": [
+        "secretsmanager:CreateSecret",
+        "secretsmanager:DescribeSecret",
+        "secretsmanager:UpdateSecret",
+        "secretsmanager:DeleteSecret",
+        "secretsmanager:RestoreSecret",
+        "secretsmanager:TagResource",
+        "secretsmanager:UntagResource",
+        "secretsmanager:PutResourcePolicy",
+        "secretsmanager:GetResourcePolicy",
+        "secretsmanager:DeleteResourcePolicy"
+      ],
+      "Resource": "arn:aws:secretsmanager:__AWS_REGION__:__AWS_ACCOUNT_ID__:secret:/retail/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "__AWS_REGION__"
+        }
+      }
+    },
+    {
+      "Sid": "RdsManagedSecret",
+      "Effect": "Allow",
+      "Action": [
+        "secretsmanager:CreateSecret",
+        "secretsmanager:TagResource",
+        "secretsmanager:DescribeSecret"
+      ],
+      "Resource": "arn:aws:secretsmanager:__AWS_REGION__:__AWS_ACCOUNT_ID__:secret:rds!db-*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "__AWS_REGION__"
+        }
+      }
+    },
+    {
+      "Sid": "CfnDynamicReferences",
+      "Effect": "Allow",
+      "Action": [
+        "secretsmanager:GetSecretValue"
+      ],
+      "Resource": [
+        "arn:aws:secretsmanager:__AWS_REGION__:__AWS_ACCOUNT_ID__:secret:/retail/platform/mq/admin-*",
+        "arn:aws:secretsmanager:__AWS_REGION__:__AWS_ACCOUNT_ID__:secret:/retail/platform/search/admin-*",
+        "arn:aws:secretsmanager:__AWS_REGION__:__AWS_ACCOUNT_ID__:secret:/retail/platform/redis/dev-*",
+        "arn:aws:secretsmanager:__AWS_REGION__:__AWS_ACCOUNT_ID__:secret:/retail/platform/redis/prod-*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "__AWS_REGION__"
+        }
+      }
+    },
+    {
+      "Sid": "ManagedKeyMetadata",
+      "Effect": "Allow",
+      "Action": [
+        "kms:DescribeKey"
+      ],
+      "Resource": "arn:aws:kms:__AWS_REGION__:__AWS_ACCOUNT_ID__:key/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "__AWS_REGION__"
+        }
+      }
+    },
+    {
+      "Sid": "ProjectBuckets",
+      "Effect": "Allow",
+      "Action": [
+        "s3:CreateBucket",
+        "s3:DeleteBucket",
+        "s3:ListBucket",
+        "s3:GetBucket*",
+        "s3:PutBucket*",
+        "s3:GetEncryptionConfiguration",
+        "s3:PutEncryptionConfiguration",
+        "s3:GetLifecycleConfiguration",
+        "s3:PutLifecycleConfiguration"
+      ],
+      "Resource": [
+        "arn:aws:s3:::retail-lab-__AWS_ACCOUNT_ID__-logs",
+        "arn:aws:s3:::retail-lab-__AWS_ACCOUNT_ID__-backup"
+      ]
+    },
+    {
+      "Sid": "StateVersioning",
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutBucketVersioning"
+      ],
+      "Resource": "arn:aws:s3:::__STATE_BUCKET__"
+    },
+    {
+      "Sid": "ProjectIam",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole",
+        "iam:GetRole",
+        "iam:UpdateRole",
+        "iam:DeleteRole",
+        "iam:UpdateAssumeRolePolicy",
+        "iam:ListRolePolicies",
+        "iam:ListAttachedRolePolicies",
+        "iam:PutRolePolicy",
+        "iam:GetRolePolicy",
+        "iam:DeleteRolePolicy",
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy",
+        "iam:TagRole",
+        "iam:UntagRole"
+      ],
+      "Resource": "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-*"
+    },
+    {
+      "Sid": "IamReadPrerequisites",
+      "Effect": "Allow",
+      "Action": [
+        "iam:ListRoles",
+        "iam:ListOpenIDConnectProviders"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "IamReadPolicies",
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetPolicy",
+        "iam:GetPolicyVersion"
+      ],
+      "Resource": [
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:policy/retail-lab-*",
+        "arn:aws:iam::aws:policy/*"
+      ]
+    },
+    {
+      "Sid": "ServiceRoleRead",
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetRole"
+      ],
+      "Resource": "arn:aws:iam::__AWS_ACCOUNT_ID__:role/aws-service-role/*"
+    },
+    {
+      "Sid": "EksOidc",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateOpenIDConnectProvider",
+        "iam:GetOpenIDConnectProvider",
+        "iam:DeleteOpenIDConnectProvider",
+        "iam:UpdateOpenIDConnectProviderThumbprint",
+        "iam:AddClientIDToOpenIDConnectProvider",
+        "iam:RemoveClientIDFromOpenIDConnectProvider",
+        "iam:TagOpenIDConnectProvider",
+        "iam:UntagOpenIDConnectProvider"
+      ],
+      "Resource": "arn:aws:iam::__AWS_ACCOUNT_ID__:oidc-provider/oidc.eks.__AWS_REGION__.amazonaws.com/*"
+    },
+    {
+      "Sid": "GithubOidcRead",
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetOpenIDConnectProvider"
+      ],
+      "Resource": "arn:aws:iam::__AWS_ACCOUNT_ID__:oidc-provider/token.actions.githubusercontent.com"
+    },
+    {
+      "Sid": "ServiceRoleCreation",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateServiceLinkedRole"
+      ],
+      "Resource": "arn:aws:iam::__AWS_ACCOUNT_ID__:role/aws-service-role/*",
+      "Condition": {
+        "StringEquals": {
+          "iam:AWSServiceName": [
+            "eks.amazonaws.com",
+            "eks-nodegroup.amazonaws.com",
+            "autoscaling.amazonaws.com",
+            "rds.amazonaws.com",
+            "elasticache.amazonaws.com",
+            "opensearchservice.amazonaws.com",
+            "mq.amazonaws.com",
+            "elasticloadbalancing.amazonaws.com"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "PassProjectRoles",
+      "Effect": "Allow",
+      "Action": [
+        "iam:PassRole"
+      ],
+      "Resource": "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-*",
+      "Condition": {
+        "StringEquals": {
+          "iam:PassedToService": [
+            "eks.amazonaws.com",
+            "ec2.amazonaws.com"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "ProjectAsgTags",
+      "Effect": "Allow",
+      "Action": [
+        "autoscaling:DescribeAutoScalingGroups",
+        "autoscaling:DescribeTags",
+        "autoscaling:CreateOrUpdateTags",
+        "autoscaling:DeleteTags"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "__AWS_REGION__"
+        }
+      }
+    },
+    {
+      "Sid": "ProjectLogs",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:DeleteLogGroup",
+        "logs:PutRetentionPolicy",
+        "logs:DeleteRetentionPolicy",
+        "logs:TagResource",
+        "logs:UntagResource",
+        "logs:ListTagsForResource"
+      ],
+      "Resource": "arn:aws:logs:__AWS_REGION__:__AWS_ACCOUNT_ID__:log-group:/aws/eks/retail-lab-eks/cluster*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "__AWS_REGION__"
+        }
+      }
+    },
+    {
+      "Sid": "LogMetadata",
+      "Effect": "Allow",
+      "Action": [
+        "logs:DescribeLogGroups"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "__AWS_REGION__"
+        }
+      }
+    },
+    {
+      "Sid": "CertificateLifecycle",
+      "Effect": "Allow",
+      "Action": [
+        "acm:DescribeCertificate",
+        "acm:DeleteCertificate",
+        "acm:AddTagsToCertificate",
+        "acm:RemoveTagsFromCertificate",
+        "acm:ListTagsForCertificate"
+      ],
+      "Resource": "arn:aws:acm:__AWS_REGION__:__AWS_ACCOUNT_ID__:certificate/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "__AWS_REGION__"
+        }
+      }
+    },
+    {
+      "Sid": "DnsLabRecords",
+      "Effect": "Allow",
+      "Action": [
+        "route53:ChangeResourceRecordSets",
+        "route53:GetHostedZone",
+        "route53:ListResourceRecordSets"
+      ],
+      "Resource": "arn:aws:route53:::hostedzone/*"
+    },
+    {
+      "Sid": "DnsChangeStatus",
+      "Effect": "Allow",
+      "Action": [
+        "route53:GetChange"
+      ],
+      "Resource": "arn:aws:route53:::change/*"
+    },
+    {
+      "Sid": "PrerequisiteIamMetadata",
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetRole",
+        "iam:GetPolicy"
+      ],
+      "Resource": [
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:role/*",
+        "arn:aws:iam::__AWS_ACCOUNT_ID__:policy/*"
+      ]
+    },
+    {
+      "Sid": "RegionalCreateWithoutResourceScope",
+      "Effect": "Allow",
+      "Action": [
+        "acm:RequestCertificate",
+        "mq:CreateBroker"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "__AWS_REGION__"
+        }
+      }
+    },
+    {
+      "Sid": "MqNetworkInterfacePermissions",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateNetworkInterfacePermission",
+        "ec2:DeleteNetworkInterfacePermission"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "__AWS_REGION__",
+          "ec2:AuthorizedService": "mq.amazonaws.com"
+        }
+      }
+    }
+  ]
+}

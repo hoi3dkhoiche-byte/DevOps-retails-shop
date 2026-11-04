@@ -3,6 +3,8 @@ admin_cidrs   = ["203.0.113.10/32"]
 admin_role_arn = "arn:aws:iam::123456789012:role/REPLACE_ADMIN_ROLE"
 github_oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
 terraform_policy_arn     = "arn:aws:iam::123456789012:policy/REPLACE_REVIEWED_INFRA_POLICY"
+# Fill from the policy renderer's manifest when it generates multiple policy parts.
+terraform_additional_policy_arns = []
 
 # Run scripts/infra/resolve-addons.py, review its output, then paste exact builds.
 addon_versions = {

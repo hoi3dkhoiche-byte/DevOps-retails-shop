@@ -1,0 +1,35 @@
+---
+- name: Validate the preflight phase and safety switch types
+  ansible.builtin.assert:
+    that:
+      - retail_preflight_phase in ['offline', 'account', 'cluster']
+      - retail_require_output_receipt is boolean
+    fail_msg: Use a supported preflight phase and a boolean retail_require_output_receipt.
+
+- name: Build the read-only preflight arguments
+  ansible.builtin.set_fact:
+    preflight_preflight_argv: >-
+      {{ [ansible_playbook_python, retail_source_dir ~ '/ansible/helpers/check_target.py',
+          '--phase', retail_preflight_phase,
+          '--source-dir', retail_source_dir, '--gitops-dir', retail_gitops_dir,
+          '--region', retail_region, '--cluster-name', retail_cluster_name]
+         + (['--account-id', retail_account_id] if retail_preflight_phase != 'offline' else [])
+         + (['--terraform-output', retail_terraform_output,
+             '--terraform-metadata', retail_terraform_metadata,
+             '--kube-context', retail_kube_context, '--kubeconfig', retail_kubeconfig]
+            if retail_preflight_phase == 'cluster' else [])
+         + (['--allow-manual-outputs']
+            if retail_preflight_phase == 'cluster' and not retail_require_output_receipt else []) }}
+
+- name: Check metadata, AWS identity and the live EKS target before any changes
+  ansible.builtin.command:
+    argv: "{{ preflight_preflight_argv }}"
+  environment: "{{ retail_aws_environment }}"
+  register: preflight_preflight_result
+  changed_when: false
+  # This helper only reads files and calls STS/DescribeCluster; it also runs in --check.
+  check_mode: false
+
+- name: Expose the validated target metadata for subsequent roles  # noqa var-naming[no-role-prefix]
+  ansible.builtin.set_fact:
+    retail_target: "{{ preflight_preflight_result.stdout | from_json }}"

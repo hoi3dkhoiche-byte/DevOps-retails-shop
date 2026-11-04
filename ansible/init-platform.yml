@@ -1,0 +1,9 @@
+---
+- name: Initialize platform credentials after verifying the AWS account
+  hosts: localhost
+  gather_facts: false
+  vars:
+    retail_preflight_phase: account
+  roles:
+    - role: preflight
+    - role: platform_credentials

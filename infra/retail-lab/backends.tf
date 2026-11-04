@@ -184,6 +184,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "data" {
 }
 resource "aws_s3_bucket_versioning" "state" {
   bucket = "manhnguyen1131"
+  lifecycle { prevent_destroy = true }
   versioning_configuration { status = "Enabled" }
 }
 

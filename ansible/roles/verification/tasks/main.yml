@@ -1,0 +1,215 @@
+---
+- name: Check that the GitOps configuration is activated
+  ansible.builtin.command:
+    argv:
+      - "{{ ansible_playbook_python }}"
+      - "{{ retail_gitops_dir }}/scripts/prepare.py"
+      - --check
+  changed_when: false
+
+- name: Validate the canonical GitOps contract without changing the cluster
+  ansible.builtin.command:
+    argv:
+      - "{{ ansible_playbook_python }}"
+      - "{{ retail_source_dir }}/ansible/helpers/bootstrap_guard.py"
+      - --gitops-dir
+      - "{{ retail_gitops_dir }}"
+      - --account-id
+      - "{{ retail_account_id }}"
+      - --region
+      - "{{ retail_region }}"
+      - --cluster-name
+      - "{{ retail_cluster_name }}"
+  register: verification_verification_guard
+  changed_when: false
+
+- name: Load expected GitOps Applications
+  ansible.builtin.set_fact:
+    verification_verification_contract: "{{ verification_verification_guard.stdout | from_json }}"
+    verification_expected_dev_applications:
+      - retail-dev-ui
+      - retail-dev-catalog
+      - retail-dev-cart
+      - retail-dev-checkout
+      - retail-dev-orders
+
+- name: Read the configured dev release
+  ansible.builtin.set_fact:
+    verification_verification_release: "{{ lookup('ansible.builtin.file', retail_gitops_dir ~ '/environments/dev/images.yaml') | from_yaml }}"
+
+- name: Require a complete digest-pinned dev release
+  ansible.builtin.assert:
+    that:
+      - verification_verification_release.release.enabled | bool
+      - verification_verification_release.release.backend_profile == 'mysql-redis-opensearch'
+      - verification_verification_release.images.keys() | sort == ['cart', 'catalog', 'checkout', 'orders', 'ui']
+    fail_msg: Verification requires the reviewed CI release to be enabled for dev in the canonical GitOps repository.
+
+- name: Require registry digests for every dev image
+  ansible.builtin.assert:
+    that:
+      - item.value.digest is match('^sha256:[0-9a-f]{64}$')
+      - item.value.reference == item.value.repository ~ '@' ~ item.value.digest
+  loop: "{{ verification_verification_release.images | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Wait for the root and platform Applications to synchronize
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ retail_kubeconfig }}"
+    context: "{{ retail_kube_context }}"
+    api_version: argoproj.io/v1alpha1
+    kind: Application
+    namespace: argocd
+    name: "{{ item }}"
+  environment: "{{ retail_aws_environment }}"
+  register: verification_verified_platform_application
+  until: >-
+    verification_verified_platform_application.resources | length == 1 and
+    verification_verified_platform_application.resources[0].status.sync.status | default('') == 'Synced' and
+    verification_verified_platform_application.resources[0].status.health.status | default('') == 'Healthy'
+  retries: 120
+  delay: 5
+  loop: >-
+    {{ ['retail-root', 'retail-argocd-secrets', 'retail-platform-resources', 'retail-dev-configuration']
+       + (verification_verification_contract.versions.keys() | reject('equalto', 'argo-cd') | list) }}
+
+- name: Wait for all five dev Applications to synchronize
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ retail_kubeconfig }}"
+    context: "{{ retail_kube_context }}"
+    api_version: argoproj.io/v1alpha1
+    kind: Application
+    namespace: argocd
+    name: "{{ item }}"
+  environment: "{{ retail_aws_environment }}"
+  register: verification_verified_dev_application
+  until: >-
+    verification_verified_dev_application.resources | length == 1 and
+    verification_verified_dev_application.resources[0].status.sync.status | default('') == 'Synced' and
+    verification_verified_dev_application.resources[0].status.health.status | default('') == 'Healthy'
+  retries: 120
+  delay: 5
+  loop: "{{ verification_expected_dev_applications }}"
+
+- name: Verify the live root source matches the guarded canonical configuration
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ retail_kubeconfig }}"
+    context: "{{ retail_kube_context }}"
+    api_version: argoproj.io/v1alpha1
+    kind: Application
+    namespace: argocd
+    name: retail-root
+  environment: "{{ retail_aws_environment }}"
+  register: verification_verified_root
+
+- name: Refuse a healthy root that targets a different repository or values
+  ansible.builtin.assert:
+    that:
+      - verification_verified_root.resources[0].spec.source == verification_verification_contract.root.spec.source
+      - verification_verified_root.resources[0].spec.sources is not defined
+      - verification_verified_root.resources[0].spec.destination == verification_verification_contract.root.spec.destination
+      - verification_verified_root.resources[0].spec.project == 'default'
+
+- name: Read dev SecretStores
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ retail_kubeconfig }}"
+    context: "{{ retail_kube_context }}"
+    api_version: external-secrets.io/v1
+    kind: SecretStore
+    namespace: retail-dev
+  environment: "{{ retail_aws_environment }}"
+  register: verification_verified_secretstores
+
+- name: Require a ready dev SecretStore
+  ansible.builtin.assert:
+    that:
+      - verification_verified_secretstores.resources | length > 0
+      - >-
+        verification_verified_secretstores.resources | map(attribute='status.conditions', default=[]) | flatten
+        | selectattr('type', 'equalto', 'Ready') | selectattr('status', 'equalto', 'True') | list | length
+        == verification_verified_secretstores.resources | length
+
+- name: Read dev ExternalSecrets without retrieving Secret values
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ retail_kubeconfig }}"
+    context: "{{ retail_kube_context }}"
+    api_version: external-secrets.io/v1
+    kind: ExternalSecret
+    namespace: retail-dev
+  environment: "{{ retail_aws_environment }}"
+  register: verification_verified_external_secrets
+
+- name: Require all dev external credentials to be ready
+  ansible.builtin.assert:
+    that:
+      - >-
+        verification_verified_external_secrets.resources | map(attribute='metadata.name') | sort
+        == ['cart-mysql', 'catalog-mysql', 'catalog-opensearch', 'checkout-redis', 'orders-mysql', 'orders-rabbitmq']
+      - >-
+        verification_verified_external_secrets.resources | map(attribute='status.conditions', default=[]) | flatten
+        | selectattr('type', 'equalto', 'Ready') | selectattr('status', 'equalto', 'True') | list | length
+        == verification_verified_external_secrets.resources | length
+
+- name: Wait for ready pods of each dev service
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ retail_kubeconfig }}"
+    context: "{{ retail_kube_context }}"
+    api_version: v1
+    kind: Pod
+    namespace: retail-dev
+    label_selectors:
+      - "app.kubernetes.io/instance={{ item }}"
+  environment: "{{ retail_aws_environment }}"
+  register: verification_verified_dev_pods
+  until: >-
+    verification_verified_dev_pods.resources | rejectattr('metadata.deletionTimestamp', 'defined') | list | length > 0 and
+    verification_verified_dev_pods.resources | rejectattr('metadata.deletionTimestamp', 'defined')
+    | map(attribute='status.conditions', default=[]) | flatten | selectattr('type', 'equalto', 'Ready')
+    | selectattr('status', 'equalto', 'True') | list | length
+    == verification_verified_dev_pods.resources | rejectattr('metadata.deletionTimestamp', 'defined') | list | length
+  retries: 120
+  delay: 5
+  loop:
+    - ui
+    - catalog
+    - cart
+    - checkout
+    - orders
+
+- name: Check dev pods use the reviewed image digest
+  ansible.builtin.assert:
+    that:
+      - >-
+        item.resources | rejectattr('metadata.deletionTimestamp', 'defined') | map(attribute='spec.containers') | flatten
+        | selectattr('image', 'equalto', verification_verification_release.images[item.item].reference) | list | length
+        == item.resources | rejectattr('metadata.deletionTimestamp', 'defined') | list | length
+    fail_msg: "{{ item.item }} pods do not use the dev release image reference from GitOps."
+  loop: "{{ verification_verified_dev_pods.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Verify actual runtime image IDs against immutable CI evidence
+  ansible.builtin.command:
+    argv:
+      - "{{ ansible_playbook_python }}"
+      - "{{ retail_source_dir }}/ansible/helpers/verify_pods.py"
+    stdin: "{{ {'images': verification_verification_release.images, 'results': verification_verified_dev_pods.results} | to_json }}"
+  no_log: true
+  register: verification_verified_runtime_images
+  changed_when: false
+  failed_when: false
+
+- name: Require runtime image identity verification to pass
+  ansible.builtin.assert:
+    that:
+      - verification_verified_runtime_images.rc == 0
+    fail_msg: "{{ verification_verified_runtime_images.stderr | default('Runtime image identity verification failed.') }}"
+
+- name: Report the scope of this read-only verification
+  ansible.builtin.debug:
+    msg:
+      - Root, platform and five dev Applications are Synced/Healthy; dev ESO resources and service pods are ready.
+      - Pod runtime image IDs match the manifest digest or image configuration ID recorded by CI.
+      - "Verified source commit: {{ verification_verification_release.release.source_commit }}"
+      - This checks deployment readiness. Run the separate dev acceptance helper before promoting to production; no accepted.json was created.

@@ -1,0 +1,21 @@
+---
+# This inventory lives at <source>/ansible/inventory.
+retail_source_dir: "{{ inventory_dir | dirname | dirname }}"
+retail_gitops_dir: "{{ retail_source_dir }}/.ci-tools/gitops-publish"
+retail_local_dir: "{{ retail_source_dir }}/.ci-tools/ansible"
+retail_region: ap-southeast-1
+retail_cluster_name: retail-lab-eks
+retail_account_id: ""
+retail_aws_profile: ""
+retail_aws_environment: >-
+  {{ {'AWS_REGION': retail_region, 'AWS_DEFAULT_REGION': retail_region, 'AWS_PAGER': ''}
+     | combine({'AWS_PROFILE': retail_aws_profile} if retail_aws_profile | length > 0 else {}) }}
+retail_kube_context: retail-lab-eks
+retail_kubeconfig: "{{ retail_local_dir }}/kubeconfig.yaml"
+retail_terraform_output: "{{ retail_local_dir }}/terraform-outputs.json"
+retail_terraform_metadata: "{{ retail_local_dir }}/metadata.json"
+retail_require_output_receipt: true
+retail_backend_timeout: 900
+retail_candidate_dir: "{{ retail_local_dir }}/gitops-candidate"
+retail_activate_candidate: false
+retail_preflight_phase: offline
