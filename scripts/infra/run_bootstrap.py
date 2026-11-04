@@ -15,6 +15,11 @@ from bootstrap_backends import output_value
 
 ROOT = Path(__file__).resolve().parents[2]
 IMAGE = "python:3.12-alpine@sha256:5789aa194f757888f41fa3d48e14b6feaa1b57c0af0b56fcb1372d6474d3bff0"
+DEPENDENCY_INSTALL_COMMAND = (
+    "python -m pip install --no-cache-dir --disable-pip-version-check --require-hashes "
+    "--target /tmp/dependencies -r /config/requirements.txt >/tmp/pip-install.log 2>&1 "
+    "|| { echo 'Dependency installation failed'; exit 1; }"
+)
 REGION = "ap-southeast-1"
 NAMESPACE = "retail-ops"
 DEFAULT_TIMEOUT = 900
@@ -44,7 +49,7 @@ def resources(outputs, name, timeout=DEFAULT_TIMEOUT):
                 "securityContext": {"runAsNonRoot": True, "runAsUser": 1000, "fsGroup": 1000},
                 "containers": [{"name": "bootstrap", "image": IMAGE, "imagePullPolicy": "IfNotPresent",
                     "command": ["sh", "-ec"], "args": [
-                        "python -m pip install --no-cache-dir --disable-pip-version-check --require-hashes --target /tmp/dependencies -r /config/requirements.txt >/tmp/pip-install.log 2>&1 || { echo 'Dependency installation failed'; exit 1; }; "
+                        DEPENDENCY_INSTALL_COMMAND + "; "
                         "python /config/bootstrap_backends.py configure --terraform-output /config/terraform-output.json --rds-ca /config/rds-ca.pem"],
                     "env": [{"name": "PYTHONPATH", "value": "/tmp/dependencies"}, {"name": "AWS_REGION", "value": "ap-southeast-1"}, {"name": "AWS_STS_REGIONAL_ENDPOINTS", "value": "regional"}],
                     "resources": {"requests": {"cpu": "100m", "memory": "128Mi"}, "limits": {"cpu": "500m", "memory": "512Mi"}},
@@ -130,7 +135,10 @@ def validate_outputs(original):
     require(rabbit is not None and rabbit.scheme == "amqps" and rabbit.port == 5671
             and not (rabbit.username or rabbit.password or rabbit.query or rabbit.fragment or rabbit.path),
             "RabbitMQ endpoint must use private AMQPS without embedded credentials")
-    hostname(rabbit.hostname, ".mq." + REGION + ".amazonaws.com", "RabbitMQ endpoint")
+    # Amazon MQ broker endpoints use amazonaws.com for IPv4 and on.aws for
+    # dual-stack. Keep both restricted to this deployment's AWS region.
+    hostname(rabbit.hostname, (".mq." + REGION + ".amazonaws.com", ".mq." + REGION + ".on.aws"),
+             "RabbitMQ endpoint")
     hostname(endpoints["RedisEndpoint"], ".cache.amazonaws.com", "Redis endpoint")
     hostname(endpoints["SearchEndpoint"], "." + REGION + ".es.amazonaws.com", "OpenSearch endpoint")
     platform = result["platform_secret_arns"]

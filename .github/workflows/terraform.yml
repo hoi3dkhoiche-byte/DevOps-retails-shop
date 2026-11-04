@@ -57,6 +57,8 @@ jobs:
           python3 -m venv /tmp/retail-infra-verify
           /tmp/retail-infra-verify/bin/pip install --require-hashes -r scripts/infra/requirements.txt
           /tmp/retail-infra-verify/bin/python -B scripts/infra/crypto_smoke.py
+      - name: Verify the exact Alpine bootstrap image and hashed dependencies
+        run: python3 -B scripts/infra/dependency_smoke.py
       - name: Verify permissions against real RabbitMQ and OpenSearch fixtures
         run: |
           set -euo pipefail

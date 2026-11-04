@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -20,6 +21,24 @@ def outputs():
 
 
 class DeploymentOutputTests(unittest.TestCase):
+    def test_optional_gateway_endpoint_is_exported_with_the_real_terraform_name(self):
+        value = outputs()
+        value["s3_gateway_endpoint_id"] = {"sensitive": False, "type": "string", "value": "vpce-0123456789abcdef0"}
+        value["s3_endpoint_id"] = {"sensitive": False, "type": "string", "value": "obsolete-alias"}
+        result = export_outputs.export(value)
+        self.assertEqual(result["s3_gateway_endpoint_id"], value["s3_gateway_endpoint_id"])
+        self.assertNotIn("s3_endpoint_id", result)
+        value["s3_gateway_endpoint_id"]["sensitive"] = True
+        with self.assertRaises(ValueError):
+            export_outputs.export(value)
+
+    def test_export_contract_names_are_present_in_the_terraform_root(self):
+        root = Path(__file__).resolve().parents[2] / "infra/retail-lab"
+        declared = set()
+        for path in root.glob("*.tf"):
+            declared.update(re.findall(r'^output\s+"([^"\n]+)"\s*\{', path.read_text(encoding="utf-8"), re.M))
+        self.assertLessEqual(export_outputs.ALLOWED, declared)
+
     def test_exports_allowlisted_native_entries_and_ignores_future_outputs(self):
         value = outputs()
         value["future_password"] = {"sensitive": True, "type": "string", "value": "never-export"}

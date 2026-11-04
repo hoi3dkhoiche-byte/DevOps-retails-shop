@@ -73,6 +73,8 @@ ESO được cài trước Argo CD để đồng bộ admin/Redis credentials. S
 
 Backend runner dùng explicit kubeconfig/context, timeout và Lease theo account để tránh bootstrap song song. JSON report nằm trong `.ci-tools/ansible/backend-bootstrap-*.json`; task thất bại vẫn giữ đường dẫn báo cáo và trả playbook failure. Nếu runner giữ Lease vì chưa xác nhận Job dừng, kiểm tra Job/Pod/Lease trước khi thử lại; không xóa Lease khi Job còn chạy. Report chỉ có metadata/trạng thái, không password.
 
+[Runbook khôi phục Lease](../docs/BOOTSTRAP_LEASE_RECOVERY.md) có lệnh dừng đúng holder Job và mở khóa bằng kiểm tra UID/resourceVersion/holder; không tự thu hồi Lease chỉ vì hết hạn.
+
 Các playbook có thao tác ghi từ chối `--check` với thông báo rõ ràng. `--syntax-check` và `preflight.yml` là cách kiểm tra offline; `--check` không thay thế nghiệm thu với API thật. Các module Helm/ESO và vòng đợi pod/Application đều có timeout, không chờ vô hạn.
 
 `verify.yml` xác nhận triển khai sẵn sàng, không thay thế chức năng mua hàng. Trước promote prod, chạy helper nghiệm thu của GitOps với **cùng AWS session và kubeconfig riêng**:

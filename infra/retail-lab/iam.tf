@@ -107,6 +107,8 @@ resource "aws_iam_role_policy" "lb" {
 }
 
 resource "aws_iam_role" "terraform" {
+  # Admin imports/reconciles this foundation role and attachments below.
+  # The CI identity policy denies self-mutation; CI refreshes a no-op copy only.
   name                 = "retail-lab-terraform"
   max_session_duration = 7200
   lifecycle { prevent_destroy = true }

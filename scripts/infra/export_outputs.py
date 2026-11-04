@@ -15,7 +15,7 @@ REQUIRED = {
     "orders_security_group_id", "buckets", "certificate_arn", "admin_cidrs", "domain",
     "application_secret_arns", "platform_secret_arns", "monitoring_secret_arns", "terraform_role_arn",
 }
-ALLOWED = REQUIRED | {"public_subnet_ids", "s3_endpoint_id"}
+ALLOWED = REQUIRED | {"public_subnet_ids", "s3_gateway_endpoint_id"}
 FORBIDDEN = {"password", "secretstring", "secret_string", "secret_access_key", "aws_access_key_id",
              "aws_secret_access_key", "aws_session_token", "session_token", "token", "private_key",
              "tls_private_key", "authorization", ".dockerconfigjson"}

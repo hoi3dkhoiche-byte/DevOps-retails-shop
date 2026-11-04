@@ -68,12 +68,22 @@ Kiểm tra OIDC provider `arn:aws:iam::<ACCOUNT_ID>:oidc-provider/token.actions.
 
 ```bash
 aws iam create-open-id-connect-provider --url https://token.actions.githubusercontent.com --client-id-list sts.amazonaws.com
-aws iam create-role --role-name retail-lab-terraform --max-session-duration 7200 --assume-role-policy-document file://.ci-tools/aws-bootstrap/trust.json
+aws iam create-role --role-name retail-lab-terraform --max-session-duration 7200 --assume-role-policy-document file://.ci-tools/aws-bootstrap/trust.json --tags Key=Project,Value=retail-lab Key=ManagedBy,Value=terraform
 ```
 
 Chỉ dùng hai lệnh create cho resource chưa tồn tại. Với resource đã có, xác minh provider URL/audience và role trust trước khi reuse. Trust được pin vào `repo:hoi3dkhoiche-byte/DevOps-retails-shop:ref:refs/heads/main`, audience `sts.amazonaws.com`.
 
 Attach từng policy ARN trong manifest vào `retail-lab-terraform`. Role/policy attachments đã được bootstrap ngoài Terraform cần import trước lần apply đầu: primary vào `aws_iam_role_policy_attachment.terraform`, các phần bổ sung vào `aws_iam_role_policy_attachment.terraform_additional["<policy-arn>"]`, role vào `aws_iam_role.terraform`. Định dạng import attachment là `<role-name>/<policy-arn>`. Operator có thể dùng Terraform container hoặc CLI đã pin để import, sau khi init backend đúng account.
+
+Policy mới **Deny thao tác ghi lên chính role CI** và policy `retail-lab-terraform*`; CI chỉ refresh/read chúng. Vì root Terraform vẫn theo dõi các resource đã import này, operator phải chuẩn bị đúng trust, session 7200 giây, mọi attachment trong manifest và hai default tag trước lần CI apply đầu. Với role cũ chưa có tag, dùng phiên admin riêng:
+
+```bash
+aws iam tag-role --role-name retail-lab-terraform --tags Key=Project,Value=retail-lab Key=ManagedBy,Value=terraform
+```
+
+Nếu plan định sửa role/trust/tag/attachment của chính CI, dừng để admin review và apply phần nền bằng phiên admin rồi tạo lại plan CI; không bỏ Deny để CI tự cấp quyền. Cập nhật policy parts phải render/review/attach đủ manifest mới bằng admin; số phần có thể thay đổi. Không dùng role CI để chạy các lệnh bootstrap IAM này.
+
+Các managed policy được CI attach vào role project đã được giới hạn vào 7 policy EKS/node/EBS đang dùng. Đây là biện pháp bảo vệ trực tiếp role CI, **chưa phải mô hình chống mọi đường nâng quyền**: quyền inline policy/trust trên role workload vẫn là delegation IAM có quyền cao. Muốn giới hạn toàn diện cần boundary bắt buộc do admin quản lý trên mọi role được CI tạo, hoặc tách IAM sang stack admin; chưa triển khai hai thay đổi kiến trúc đó trong lab này. [AWS permissions boundaries](https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_boundaries.html)
 
 Terraform role, service-linked role do Terraform tạo và versioning của state có `prevent_destroy`. Khi dọn lab, giữ các thành phần nền này; nếu muốn đổi quyền quản lý thì dùng quy trình state handoff được review, không tắt bảo vệ và chạy destroy toàn bộ theo thói quen.
 

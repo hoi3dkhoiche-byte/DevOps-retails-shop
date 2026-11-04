@@ -125,6 +125,40 @@ class RunnerInputTests(unittest.TestCase):
         with self.assertRaises(runner.RunnerError):
             runner.validate_outputs(candidate)
 
+    def test_ipv4_and_dual_stack_rabbitmq_endpoints_accept_native_and_flat_outputs(self):
+        for suffix in ("amazonaws.com", "on.aws"):
+            for native in (False, True):
+                endpoint = "amqps://b-test-1.mq.ap-southeast-1." + suffix + ":5671"
+                candidate = outputs()
+                candidate["backend_endpoints"]["RabbitMQEndpoint"] = endpoint
+                if native:
+                    candidate = {key: {"value": value, "sensitive": False} for key, value in candidate.items()}
+                with self.subTest(suffix=suffix, native=native):
+                    accepted = runner.validate_outputs(candidate)
+                    self.assertEqual(accepted["backend_endpoints"]["RabbitMQEndpoint"], endpoint)
+
+    def test_dual_stack_endpoint_does_not_relax_target_or_transport_guards(self):
+        invalid = [
+            "amqps://b-test-1.mq.us-east-1.on.aws:5671",
+            "amqps://b-test-1.mq.ap-southeast-1.on.aws.attacker.example:5671",
+            "amqps://b-test-1.mq.ap-southeast-1.amazonaws.com.attacker.example:5671",
+            "amqps://b-test-1.mq.ap-southeast-1-on.aws:5671",
+            "amqps://b-test-1.mq.ap-southeast-1.api.aws:5671",
+            "amqp://b-test-1.mq.ap-southeast-1.on.aws:5671",
+            "https://b-test-1.mq.ap-southeast-1.on.aws:5671",
+            "amqps://b-test-1.mq.ap-southeast-1.on.aws:5672",
+            "amqps://b-test-1.mq.ap-southeast-1.on.aws",
+            "amqps://user:password@b-test-1.mq.ap-southeast-1.on.aws:5671",
+            "amqps://b-test-1.mq.ap-southeast-1.on.aws:5671/vhost",
+            "amqps://b-test-1.mq.ap-southeast-1.on.aws:5671?token=secret",
+            "amqps://b-test-1.mq.ap-southeast-1.on.aws:5671#fragment",
+        ]
+        for endpoint in invalid:
+            candidate = outputs()
+            candidate["backend_endpoints"]["RabbitMQEndpoint"] = endpoint
+            with self.subTest(endpoint=endpoint), self.assertRaises(runner.RunnerError):
+                runner.validate_outputs(candidate)
+
     def test_render_only_never_executes_kubectl_or_aws(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "outputs.json"
@@ -134,6 +168,14 @@ class RunnerInputTests(unittest.TestCase):
                 self.assertEqual(result, 0)
                 self.assertEqual(json.loads(stdout.getvalue())["kind"], "List")
             command.assert_not_called()
+
+    def test_job_uses_the_installer_command_shared_with_the_alpine_smoke(self):
+        with patch.object(runner, "DEPENDENCY_INSTALL_COMMAND", "fixture-installer-command"):
+            job = next(item for item in runner.resources(outputs(), "fixture")["items"] if item["kind"] == "Job")
+        container = job["spec"]["template"]["spec"]["containers"][0]
+        self.assertEqual(container["image"], runner.IMAGE)
+        self.assertEqual(container["command"], ["sh", "-ec"])
+        self.assertTrue(container["args"][0].startswith("fixture-installer-command; python /config/bootstrap_backends.py"))
 
     def test_job_names_do_not_collide_within_one_second(self):
         names = {runner.unique_name() for _ in range(20)}

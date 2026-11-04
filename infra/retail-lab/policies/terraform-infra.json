@@ -120,6 +120,22 @@
       }
     },
     {
+      "Sid": "LaunchManagedNodesFromRegionalTemplates",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:RunInstances"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "__AWS_REGION__"
+        },
+        "ArnLike": {
+          "ec2:LaunchTemplate": "arn:aws:ec2:__AWS_REGION__:__AWS_ACCOUNT_ID__:launch-template/*"
+        }
+      }
+    },
+    {
       "Sid": "EksProject",
       "Effect": "Allow",
       "Action": [
@@ -346,6 +362,8 @@
         "s3:DeleteBucket",
         "s3:ListBucket",
         "s3:GetBucket*",
+        "s3:GetAccelerateConfiguration",
+        "s3:GetReplicationConfiguration",
         "s3:PutBucket*",
         "s3:GetEncryptionConfiguration",
         "s3:PutEncryptionConfiguration",
@@ -379,12 +397,67 @@
         "iam:PutRolePolicy",
         "iam:GetRolePolicy",
         "iam:DeleteRolePolicy",
-        "iam:AttachRolePolicy",
-        "iam:DetachRolePolicy",
         "iam:TagRole",
         "iam:UntagRole"
       ],
       "Resource": "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-*"
+    },
+    {
+      "Sid": "AttachReviewedServicePolicies",
+      "Effect": "Allow",
+      "Action": [
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy"
+      ],
+      "Resource": "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-*",
+      "Condition": {
+        "ArnEquals": {
+          "iam:PolicyARN": [
+            "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy",
+            "arn:aws:iam::aws:policy/AmazonEKSVPCResourceController",
+            "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy",
+            "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPullOnly",
+            "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy",
+            "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore",
+            "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "DenyTerraformRoleSelfMutation",
+      "Effect": "Deny",
+      "Action": [
+        "iam:CreateRole",
+        "iam:DeleteRole",
+        "iam:UpdateRole",
+        "iam:UpdateRoleDescription",
+        "iam:UpdateAssumeRolePolicy",
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy",
+        "iam:PutRolePolicy",
+        "iam:DeleteRolePolicy",
+        "iam:PutRolePermissionsBoundary",
+        "iam:DeleteRolePermissionsBoundary",
+        "iam:TagRole",
+        "iam:UntagRole",
+        "iam:PassRole"
+      ],
+      "Resource": "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-terraform"
+    },
+    {
+      "Sid": "DenyTerraformPolicyMutation",
+      "Effect": "Deny",
+      "Action": [
+        "iam:CreatePolicy",
+        "iam:CreatePolicyVersion",
+        "iam:SetDefaultPolicyVersion",
+        "iam:DeletePolicy",
+        "iam:DeletePolicyVersion",
+        "iam:TagPolicy",
+        "iam:UntagPolicy"
+      ],
+      "Resource": "arn:aws:iam::__AWS_ACCOUNT_ID__:policy/retail-lab-terraform*"
     },
     {
       "Sid": "IamReadPrerequisites",

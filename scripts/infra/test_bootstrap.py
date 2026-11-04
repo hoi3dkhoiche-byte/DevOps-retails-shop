@@ -69,6 +69,20 @@ class BootstrapTests(unittest.TestCase):
         roles = [call.args[3] for call in put.call_args_list if "/roles/" in call.args[1]]
         self.assertEqual([["products-dev"], ["products-prod"]], [role["index_permissions"][0]["index_patterns"] for role in roles])
 
+    def test_rabbit_ipv4_and_dual_stack_addresses_reach_management_and_secrets_unchanged(self):
+        for suffix in ("amazonaws.com", "on.aws"):
+            store, put = SecretStore(), Mock()
+            host = "b-offline-1.mq.ap-southeast-1." + suffix
+            address = "amqps://" + host + ":5671"
+            with self.subTest(suffix=suffix):
+                bootstrap.rabbit_accounts(store, address, {"username": "admin", "password": "fixture"}, put=put)
+                self.assertTrue(put.call_args_list)
+                self.assertTrue(all(call.args[0] == "https://" + host for call in put.call_args_list))
+                for env in bootstrap.ENVIRONMENTS:
+                    secret = store.values[f"/retail/{env}/orders/rabbitmq"]
+                    self.assertEqual(secret["addresses"], address)
+                    self.assertEqual(secret["vhost"], "retail-" + env)
+
     def test_orders_permissions_allow_both_amqp_bindings_and_no_other_resources(self):
         put = Mock()
         bootstrap.rabbit_accounts(self.store, "amqps://private.mq.ap-southeast-1.amazonaws.com:5671",
