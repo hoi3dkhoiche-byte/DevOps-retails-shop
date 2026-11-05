@@ -24,6 +24,7 @@ root = Path(__file__).resolve().parents[1]
 values = json.loads(Path(a.terraform_output).read_text(encoding="utf-8-sig"))
 assert "account_id" in values, "missing output"
 (root / "config.yaml").write_text(json.dumps({"accountId": values["account_id"],
+    "deploymentProfile": values.get("deployment_profile", "architecture"),
     "deployment": {"enabled": a.activate}}))
 '''
 CHECK_RELEASE = '''import json, os
@@ -138,6 +139,15 @@ class CandidateTests(unittest.TestCase):
         self.assertTrue(self.prepare()["changed"])
         self.assertEqual(json.loads((self.target / "config.yaml").read_text())["accountId"], "444455556666")
         self.assertFalse(self.prepare()["changed"])
+
+    def test_profile_metadata_and_tracked_lab_overlays_reach_the_candidate(self):
+        self.write("profiles/lab/argo-cd.yaml", "applicationSet: {replicas: 0}\n")
+        self.commit(self.gitops)
+        self.outputs.write_text('{"account_id":"111122223333","deployment_profile":"lab"}', encoding="utf-8")
+        self.prepare()
+        config = json.loads((self.target / "config.yaml").read_text())
+        self.assertEqual(config["deploymentProfile"], "lab")
+        self.assertTrue((self.target / "profiles/lab/argo-cd.yaml").is_file())
 
     def test_existing_unowned_directory_is_refused(self):
         self.target.mkdir()

@@ -56,7 +56,8 @@
         "elasticache:List*",
         "es:ListVersions",
         "es:ListInstanceTypeDetails",
-        "es:DescribeInstanceTypeLimits"
+        "es:DescribeInstanceTypeLimits",
+        "elasticloadbalancing:DescribeLoadBalancers"
       ],
       "Resource": "*",
       "Condition": {
@@ -361,6 +362,7 @@
         "s3:CreateBucket",
         "s3:DeleteBucket",
         "s3:ListBucket",
+        "s3:ListBucketVersions",
         "s3:GetBucket*",
         "s3:GetAccelerateConfiguration",
         "s3:GetReplicationConfiguration",
@@ -373,6 +375,15 @@
       "Resource": [
         "arn:aws:s3:::retail-lab-__AWS_ACCOUNT_ID__-logs",
         "arn:aws:s3:::retail-lab-__AWS_ACCOUNT_ID__-backup"
+      ]
+    },
+    {
+      "Sid": "ReviewedLabDataObjectCleanup",
+      "Effect": "Allow",
+      "Action": ["s3:DeleteObject", "s3:DeleteObjectVersion"],
+      "Resource": [
+        "arn:aws:s3:::retail-lab-__AWS_ACCOUNT_ID__-logs/*",
+        "arn:aws:s3:::retail-lab-__AWS_ACCOUNT_ID__-backup/*"
       ]
     },
     {
@@ -786,6 +797,52 @@
         "StringEquals": {
           "aws:RequestedRegion": "__AWS_REGION__",
           "ec2:AuthorizedService": "mq.amazonaws.com"
+        }
+      }
+    },
+    {
+      "Sid": "TerraformRoleReadOnlyRefresh",
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetRole",
+        "iam:ListRolePolicies",
+        "iam:ListAttachedRolePolicies",
+        "iam:GetRolePolicy"
+      ],
+      "Resource": "arn:aws:iam::__AWS_ACCOUNT_ID__:role/retail-lab-terraform"
+    },
+    {
+      "Sid": "OpenSearchServiceLinkedRoleTags",
+      "Effect": "Allow",
+      "Action": [
+        "iam:TagRole",
+        "iam:UntagRole"
+      ],
+      "Resource": "arn:aws:iam::__AWS_ACCOUNT_ID__:role/aws-service-role/opensearchservice.amazonaws.com/AWSServiceRoleForAmazonOpenSearchService"
+    },
+    {
+      "Sid": "MysqlDefaultOptionGroupCreate",
+      "Effect": "Allow",
+      "Action": [
+        "rds:CreateDBInstance"
+      ],
+      "Resource": "arn:aws:rds:__AWS_REGION__:__AWS_ACCOUNT_ID__:og:default:mysql-8-4",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "__AWS_REGION__"
+        }
+      }
+    },
+    {
+      "Sid": "AccountPlanReadOnlyGate",
+      "Effect": "Allow",
+      "Action": [
+        "freetier:GetAccountPlanState"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "us-east-1"
         }
       }
     }

@@ -1,7 +1,7 @@
 resource "aws_secretsmanager_secret" "monitoring" {
   for_each                = toset(["grafana/admin", "alertmanager/config", "argocd/admin", "argocd/redis", "argocd/repositories"])
   name                    = "/retail/platform/${each.key}"
-  recovery_window_in_days = 7
+  recovery_window_in_days = local.lab_profile ? 0 : 7
 }
 
 resource "aws_iam_role_policy" "eso_monitoring" {

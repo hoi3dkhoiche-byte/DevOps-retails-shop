@@ -2,20 +2,30 @@
 
 Sau khi apply và tải artifact deployment-context, dùng [runbook Ansible](../ansible/README.md) để bootstrap backend, review GitOps candidate và cài ESO/Argo CD. Ansible controller cần Linux/WSL với phiên AWS operator riêng.
 
-Tài khoản đã có nhưng máy hiện chưa có AWS CLI/profile. Có thể bắt đầu phần bootstrap tài khoản bằng **AWS CloudShell trong Console**, không cần gửi access key hoặc token qua chat. Terraform và Ansible chưa tạo tài nguyên thật trong đợt hoàn thiện code này.
+Runbook này dành cho lần triển khai đầu trên account mới. Nếu máy chưa có AWS CLI/profile, có thể bắt đầu phần bootstrap tài khoản bằng **AWS CloudShell trong Console**, không cần gửi access key hoặc token qua chat. Nếu công cụ và tài nguyên nền đã có, kiểm tra rồi reuse thay vì chạy lại các lệnh create. Trạng thái tài nguyên thật phải lấy từ API/receipt của lần triển khai, không suy từ kết quả test code.
+
+Nếu dùng máy local, chuẩn bị [controller Ubuntu/WSL](CONTROLLER_SETUP.md), cài toolchain bằng `bash scripts/setup-controller.sh --install-tools`, source `.ci-tools/controller/env.sh`, rồi làm theo flow **IAM browser → process provider → operator role** trong hướng dẫn controller. Ba profile mẫu là `retail-iam-console`, `retail-iam-session`, `retail-operator`; profile cuối phải trả về `assumed-role` của role quản trị lab. Chạy `--install` để có thêm Ansible trước giai đoạn bootstrap backend. Cài CLI và kiểm tra STS chưa tạo hạ tầng; preflight/plan thật còn cần các prerequisite IAM/state bên dưới.
 
 ## 1. Vào đúng account và Singapore
 
-Đăng nhập AWS Console bằng danh tính quản trị của bạn, chọn `ap-southeast-1`, mở CloudShell. Chạy:
+Đăng nhập AWS Console bằng danh tính quản trị của bạn, chọn `ap-southeast-1`, mở CloudShell. Với IAM user, dùng Account ID 12 chữ số hoặc alias đã tạo trong IAM; tên hiển thị account không tự trở thành alias. Chạy trong CloudShell:
 
 ```bash
 aws sts get-caller-identity
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+aws freetier get-account-plan-state --region us-east-1 \
+  --query '{accountId:accountId,accountPlanType:accountPlanType,accountPlanStatus:accountPlanStatus}'
 git clone https://github.com/hoi3dkhoiche-byte/DevOps-retails-shop.git
 cd DevOps-retails-shop
 ```
 
-Clone source sau khi các thay đổi mới đã được push. Nếu chưa có quyền tạo IAM/VPC/EKS thì dùng danh tính quản trị phù hợp; không tạo access key root để chép vào GitHub. Các lệnh dưới đây là bước operator thực hiện sau khi đọc policy, không được workflow app CI tự chạy.
+Clone source sau khi các thay đổi mới đã được push. Nếu chạy các lệnh bên dưới trên controller local, chọn rõ profile bằng `export AWS_PROFILE=retail-operator` sau khi đã xác minh STS; thao tác bootstrap IAM/state cần quyền admin riêng thì chọn profile admin đã review và đổi lại operator trước preflight/kubectl/Ansible. Không đổi ngầm danh tính của một profile đang dùng. Nếu chưa có quyền tạo IAM/VPC/EKS thì dùng danh tính quản trị phù hợp; không tạo access key root để chép vào GitHub. Các lệnh dưới đây là bước operator thực hiện sau khi đọc policy, không được workflow app CI tự chạy.
+
+**Kiểm tra account plan và chọn profile trước khi tạo tài nguyên.** `accountId` phải khớp STS và `accountPlanStatus` phải là `ACTIVE`. Mặc định `deployment_profile="lab"` dùng hai worker `m7i-flex.large`, không có production, MySQL micro/20Gi, RabbitMQ một node và OpenSearch 10Gi. Lab chấp nhận `FREE` hoặc `PAID`; với Free plan, preflight kiểm tra rõ `FreeTierEligible=true`, amd64 và AZ của worker. Xem cấu hình, hành vi xóa dữ liệu và giới hạn tại [profile lab](DEV_DEPLOYMENT.md).
+
+Profile `architecture` giữ thiết kế đầy đủ và yêu cầu `PAID`/`ACTIVE`; Free plan đã thực tế từ chối worker `m6i` và backup RDS 7 ngày của cấu hình đó. Credit khuyến mãi không gỡ giới hạn gói và không làm tài nguyên trở thành miễn phí. Profile lab mới đã qua kiểm tra code, nhưng chưa được apply/acceptance trên AWS; catalog và worker eligibility không chứng minh mọi backend được gói tài khoản chấp nhận, kể cả retention RDS một ngày.
+
+Trạng thái chưa active, khác account, metadata thiếu/không biết hoặc API lỗi đều chặn create plan để operator kiểm tra Billing/quyền `freetier:GetAccountPlanState`. Saved-plan apply lấy profile từ chính binary plan đã kiểm checksum, không nhận một profile mới để bỏ qua gate. Không helper/workflow nào tự nâng account plan; policy không cấp `freetier:UpgradeAccountPlan`. Teardown là luồng riêng và không bị chặn chỉ vì account đang Free. [GetAccountPlanState](https://docs.aws.amazon.com/aws-cost-management/latest/APIReference/API_freetier_GetAccountPlanState.html), [Free Tier endpoint tại us-east-1](https://docs.aws.amazon.com/general/latest/gr/billing.html).
 
 ## 2. Chuẩn bị state bucket trước Terraform init
 
@@ -107,7 +117,7 @@ Làm theo [infra runbook](../scripts/infra/README.md) để chạy `init-platfor
 - Bốn ARN platform Secret; pin add-on builds từ API.
 - Domain/hosted zone nếu dùng; có thể giữ rỗng cho lab.
 
-`admin_role_arn` là role của người sẽ chạy kubectl/Ansible, không phải root ARN, IAM user ARN hoặc role CI build image. Nếu account mới chỉ có root login, thiết lập một danh tính quản trị ngắn hạn qua IAM Identity Center hoặc role operator phù hợp trước; lấy ARN role thực tế từ IAM. Preflight kiểm tra role tồn tại, OIDC có đúng URL/audience và các policy có thể attach trước khi tạo EKS. Không điền một ARN tự đặt chưa có trong account.
+`admin_role_arn` là role của người sẽ chạy kubectl/Ansible, không phải root ARN, IAM user ARN hoặc role CI build image. Nếu account mới chỉ có root login, admin chuẩn bị IAM Identity Center hoặc IAM user Console có quyền assume operator role; role cần trust đúng user và có quyền cho hạ tầng lab. Đăng nhập IAM rồi assume role theo [hướng dẫn controller](CONTROLLER_SETUP.md), lấy ARN IAM role thực tế từ IAM. `aws sts get-caller-identity --profile retail-operator` phải cho đúng account và `arn:aws:sts::<ACCOUNT_ID>:assumed-role/<operator-role>/<session>` trước khi triển khai. Nếu thấy `:root` hoặc `:user/`, profile vẫn chưa đúng flow operator. Preflight kiểm tra role tồn tại, OIDC có đúng URL/audience và các policy có thể attach trước khi tạo EKS; kiểm tra đó không thay việc thử assume role thật. Không điền một ARN tự đặt chưa có trong account.
 
 Tại repo source, đặt Actions Variables `TERRAFORM_ROLE_ARN` và `TERRAFORM_TFVARS_JSON`. JSON chỉ có cấu hình/ARN; không có password. CloudShell khởi tạo tài khoản không thay thế danh tính AWS của máy chạy kubectl/Ansible. Trước giai đoạn đó, cài AWS CLI v2 trên WSL/Linux và thiết lập đăng nhập ngắn hạn phù hợp với IAM/SSO của account; không chép static keys vào inventory.
 
@@ -116,11 +126,11 @@ Tại repo source, đặt Actions Variables `TERRAFORM_ROLE_ARN` và `TERRAFORM_
 Workflow **Retail Terraform** có ba operation:
 
 1. `validate`: test code và fixture, không cần AWS role.
-2. `plan`: đăng nhập OIDC, kiểm tra account/state/capacity, tạo saved plan. Đọc diff và SHA256.
-3. `apply`: chọn đúng run/attempt/SHA256 của plan đã review. Chưa có plan thì chưa apply.
+2. `plan`: đăng nhập OIDC, xác minh STS và account plan `PAID`/`ACTIVE` trước IAM/state/capacity, rồi tạo saved plan. Đọc diff và SHA256.
+3. `apply`: chọn đúng run/attempt/SHA256 của plan đã review; kiểm tra lại account plan và live workload boundary trước apply. Chưa có plan hợp lệ hoặc chưa qua gate thì chưa apply.
 
 Sau apply, artifact `deployment-context-<run>-<attempt>` chứa `terraform-outputs.json` đã allowlist cùng metadata/checksum. Không có state hoặc giá trị password/token. Dùng outputs này cho runner bootstrap và chuẩn bị GitOps. Backend bootstrap hỗ trợ `--kubeconfig` và `--report`, có khóa chống chạy đồng thời; xem hướng dẫn recovery trong runbook trước khi xóa lease.
 
-Nghiệm thu cuối vẫn cần cold apply thực tế, bootstrap thành công, dev đúng digest, persistence/isolation, MQ failover và restore. Test offline không chứng minh capacity, quota, IAM hoặc RTO/RPO của account.
+Nghiệm thu cuối vẫn cần apply hoàn tất, bootstrap thành công, dev đúng digest, persistence/isolation, MQ failover và restore. Nếu apply dừng giữa chừng, giữ state và đối chiếu tài nguyên đã tạo bằng API trước khi lập plan mới; dừng apply không đồng nghĩa đã dừng hoặc xóa toàn bộ tài nguyên. Test offline không chứng minh capacity, quota, IAM hoặc RTO/RPO của account.
 
 Nguồn: [S3 backend locking](https://developer.hashicorp.com/terraform/language/backend/s3), [GitHub OIDC cho AWS](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws), [IAM policy quotas](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_iam-quotas.html), [CloudShell](https://docs.aws.amazon.com/cloudshell/latest/userguide/welcome.html).

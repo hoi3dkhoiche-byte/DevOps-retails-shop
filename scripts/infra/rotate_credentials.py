@@ -7,7 +7,6 @@ import json
 import os
 from pathlib import Path
 import re
-import secrets
 import socket
 import ssl
 import struct
@@ -19,6 +18,7 @@ import urllib.request
 import uuid
 
 from run_bootstrap import load_outputs, REGION
+from bootstrap_backends import generate_password
 
 TARGETS = {('catalog', 'mysql'), ('cart', 'mysql'), ('orders', 'mysql'),
            ('orders', 'rabbitmq'), ('catalog', 'opensearch'), ('checkout', 'redis')}
@@ -120,6 +120,8 @@ def rotate(outputs, client, adapter, selection, execute=False, maintenance=False
     require(not report['maintenance_required'] or maintenance, 'maintenance_ack_required')
     require(all(not any('AWSPENDING' in labels and version != token for version, labels in stages.items())
                 for _, stages, _ in known), 'another_rotation_pending')
+    require(rollback or not any('RETAIL_ROLLED_BACK' in stages.get(token, []) for _, stages, _ in known),
+            'operation_already_rolled_back')
     fresh_values = {}
     for index, (arn, stages, current) in enumerate(known):
         if token not in stages and not rollback:
@@ -155,12 +157,13 @@ def rotate(outputs, client, adapter, selection, execute=False, maintenance=False
                         and original['_rotation'].get('operation_id') == current, 'prior_rotation_metadata_invalid')
                 require('RETAIL_FINALIZED' in stages[current], 'previous_rotation_not_finalized')
             if new_password is None:
-                new_password = secrets.token_urlsafe(36)
+                new_password = generate_password()
             pending = candidate(selection, original, previous, new_password)
             if not rollback:
                 report['changed'] = True
                 client.put_secret_value(SecretId=arn, ClientRequestToken=token,
                                         VersionStages=['AWSPENDING'], SecretString=json.dumps(pending, separators=(',', ':')))
+        validate_value(selection, original, outputs, platform=index == 0 and len(names) == 2)
         validate_value(selection, pending, outputs, platform=index == 0 and len(names) == 2)
         if index == 0:
             new_password = pending.get('password')
@@ -204,7 +207,15 @@ def rotate(outputs, client, adapter, selection, execute=False, maintenance=False
                       next_step='Old backend password is retired; preserve the operation report for audit.')
         return report
     report['phase'] = 'backend'
-    if not adapter.check(selection, desired):
+    if rollback:
+        # An old secondary password still authenticating is not a completed
+        # rollback. Restore it as primary and revoke the failed pending password.
+        if not adapter.check(selection, original) or adapter.check(selection, pending):
+            report.update(changed=True, backend_may_have_changed=True)
+            adapter.rollback(selection, original, pending)
+        require(adapter.check(selection, original), 'backend_verification_failed')
+        require(not adapter.check(selection, pending), 'rolled_back_password_still_accepted')
+    elif not adapter.check(selection, desired):
         require(rollback or not any(entry['current'] == token for entry in entries), 'published_credential_rejected')
         report.update(changed=True, backend_may_have_changed=True)
         adapter.apply(selection, desired, pending if rollback else original)
@@ -224,8 +235,24 @@ def rotate(outputs, client, adapter, selection, execute=False, maintenance=False
         if 'AWSPENDING' in stages.get(token, []):
             report['changed'] = True
             client.update_secret_version_stage(SecretId=entry['arn'], VersionStage='AWSPENDING', RemoveFromVersionId=token)
+    if rollback:
+        for entry in entries:
+            _, stages, current = metadata(client, entry['name'], outputs['account_id'])
+            require(current == entry['previous'], 'rotation_version_conflict')
+            # If staging stopped before the second Redis version existed,
+            # record the rollback on its unchanged original version instead.
+            marker_version = token if token in stages else current
+            markers = [version for version, labels in stages.items() if 'RETAIL_ROLLED_BACK' in labels]
+            require(len(markers) <= 1, 'invalid_rollback_stage')
+            if marker_version not in markers:
+                arguments = {'SecretId': entry['arn'], 'VersionStage': 'RETAIL_ROLLED_BACK',
+                             'MoveToVersionId': marker_version}
+                if markers:
+                    arguments['RemoveFromVersionId'] = markers[0]
+                report['changed'] = True
+                client.update_secret_version_stage(**arguments)
     report.update(status='success', phase='complete', rollback=rollback,
-                  old_password_retained=selection['backend'] in {'mysql', 'redis'},
+                  old_password_retained=selection['backend'] in {'mysql', 'redis'} and not rollback,
                   next_step='Wait for ESO refresh, review a GitOps secretRevision change, sync and run dev acceptance.')
     return report
 
@@ -405,6 +432,18 @@ class PrivateBackends:
                     return
                 time.sleep(5)
             raise RotationError('redis_user_update_timeout')
+
+    def rollback(self, selection, original, rejected):
+        if selection['backend'] == 'redis':
+            # Replace the entire password set rather than leaving both values.
+            self.finalize(selection, original)
+        else:
+            # MySQL apply establishes the desired primary before DISCARD OLD;
+            # single-password backends simply replace their rejected password.
+            self.apply(selection, original, rejected)
+            require(self.check(selection, original), 'backend_verification_failed')
+            if selection['backend'] == 'mysql':
+                self.finalize(selection, original)
 
 
 def main(argv=None):

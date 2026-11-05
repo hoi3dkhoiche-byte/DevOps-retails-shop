@@ -12,6 +12,7 @@ from urllib.parse import unquote
 from render_terraform_policy import boundary_checksum, delegated_role_names, render_boundary
 
 REGION = "ap-southeast-1"
+SERVICE_REGIONS = {"freetier": "us-east-1"}
 ADDONS = {"vpc_cni": "vpc-cni", "coredns": "coredns", "kube_proxy": "kube-proxy", "ebs_csi": "aws-ebs-csi-driver"}
 SEARCH_SERVICE_ROLES = {
     "AWSServiceRoleForAmazonOpenSearchService": "opensearchservice.amazonaws.com",
@@ -33,12 +34,107 @@ BLOCKED_ADMIN_CIDRS = (
 )
 WORKER_OFFERINGS = {"m6i.xlarge": {"ap-southeast-1a"},
                     "m6i.large": {"ap-southeast-1a", "ap-southeast-1b", "ap-southeast-1c"}}
+PROFILES = {
+    "lab": {"workers": {"m7i-flex.large": {"ap-southeast-1a", "ap-southeast-1b", "ap-southeast-1c"}},
+            "mysql_instance_class": "db.t4g.micro", "mysql_storage_gib": 20,
+            "mq_instance_type": "mq.m7g.medium", "mq_mode": "SINGLE_INSTANCE",
+            "mq_zones": {"ap-southeast-1a"}, "search_volume_gib": 10},
+    "architecture": {"workers": WORKER_OFFERINGS, "mysql_instance_class": "db.t4g.small",
+                     "mysql_storage_gib": 30, "mq_instance_type": "mq.m7g.large", "mq_mode": "CLUSTER_MULTI_AZ",
+                     "mq_zones": {"ap-southeast-1a", "ap-southeast-1b", "ap-southeast-1c"}, "search_volume_gib": 50},
+}
+TERRAFORM_ROOT = Path(__file__).resolve().parents[2] / "infra/retail-lab"
+
+
+def profile_settings(config):
+    name = config.get("deployment_profile", "lab")
+    if not isinstance(name, str) or name not in PROFILES:
+        raise ValueError("deployment_profile must be lab or architecture")
+    override = config.get("mysql_instance_class")
+    if override is not None and (not isinstance(override, str) or re.fullmatch(r"db\.[a-z0-9]+\.[a-z0-9]+", override) is None):
+        raise ValueError("mysql_instance_class must be a valid DB instance class or null")
+    if name == "lab" and (override not in (None, "db.t4g.micro") or config.get("mysql_multi_az", False)
+                          or config.get("deploy_production_node_group", False)):
+        raise ValueError("The lab profile requires db.t4g.micro, Single-AZ and no production workers")
+    return dict(PROFILES[name], name=name, mysql_instance_class=override or PROFILES[name]["mysql_instance_class"])
+
+
+def reviewed_plan_settings(path):
+    """Read the selected profile from the already checksum-verified binary plan."""
+    try:
+        result = subprocess.run(["terraform", "-chdir=" + str(TERRAFORM_ROOT), "show", "-json", str(path.resolve())],
+                                check=True, capture_output=True, text=True, timeout=120)
+        variables = json.loads(result.stdout).get("variables")
+        if not isinstance(variables, dict):
+            raise ValueError("Missing plan variables")
+        # Plans predating explicit profiles retain the full architecture policy.
+        config = {"deployment_profile": "architecture"}
+        for key in ("deployment_profile", "mysql_instance_class", "mysql_multi_az", "deploy_production_node_group"):
+            if key not in variables:
+                continue
+            entry = variables[key]
+            if not isinstance(entry, dict) or "value" not in entry:
+                raise ValueError("Malformed plan variable")
+            if key == "deployment_profile" and entry["value"] is None:
+                raise ValueError("Missing plan profile value")
+            if entry["value"] is not None:
+                config[key] = entry["value"]
+        for key in ("mysql_multi_az", "deploy_production_node_group"):
+            if key in config and type(config[key]) is not bool:
+                raise ValueError("Invalid plan boolean")
+        return profile_settings(config)
+    except (subprocess.SubprocessError, OSError, ValueError, AttributeError) as error:
+        raise ValueError("Cannot read a valid deployment profile from the reviewed Terraform plan; init providers and verify the plan first") from error
 
 
 def aws(service, operation, *arguments):
-    command = ["aws", service, operation, "--region", REGION, "--output", "json", "--no-cli-pager", *arguments]
+    region = SERVICE_REGIONS.get(service, REGION)
+    command = ["aws", service, operation, "--region", region, "--output", "json", "--no-cli-pager", *arguments]
     result = subprocess.run(command, check=True, capture_output=True, text=True, timeout=120)
     return json.loads(result.stdout) if result.stdout.strip() else {}
+
+
+def check_account_plan(account, deployment_profile="architecture"):
+    """Keep plan eligibility distinct from credits and regional availability."""
+    if not isinstance(deployment_profile, str) or deployment_profile not in PROFILES:
+        raise ValueError("deployment_profile must be lab or architecture")
+    try:
+        plan = aws("freetier", "get-account-plan-state")
+    except (subprocess.SubprocessError, OSError, json.JSONDecodeError) as error:
+        raise ValueError("Cannot verify the AWS account plan with freetier:GetAccountPlanState in us-east-1. "
+                         "Check API access and the Billing account plan before retrying; unavailable or legacy plan "
+                         "metadata requires operator review. Deployment stopped without upgrading the account.") from error
+    if not isinstance(plan, dict) or plan.get("accountId") != account:
+        raise ValueError("AWS account plan metadata is missing or belongs to another account; deployment stopped")
+    kind, status = plan.get("accountPlanType"), plan.get("accountPlanStatus")
+    if (not isinstance(kind, str) or kind not in {"FREE", "PAID"}
+            or not isinstance(status, str) or status not in {"NOT_STARTED", "ACTIVE", "EXPIRED"}):
+        raise ValueError("AWS account plan type/status is missing or unrecognized; review Billing before deployment")
+    if kind == "FREE" and deployment_profile == "architecture":
+        raise ValueError("The architecture profile requires an ACTIVE PAID AWS account plan; this account uses FREE. "
+                         "Review its service limits and deployment costs in Billing, then explicitly decide whether "
+                         "to change the plan or redesign the lab. Available credits do not remove Free plan limits; "
+                         "this script never upgrades the account.")
+    if status != "ACTIVE":
+        raise ValueError("This deployment requires an ACTIVE AWS account plan; the account plan is not active. "
+                         "Review Billing before retrying deployment.")
+    return kind
+
+
+def check_free_worker_types(settings):
+    """Fail closed on Free-plan eligibility; type/AZ orderability is separate."""
+    result = aws("ec2", "describe-instance-types", "--instance-types", *sorted(settings["workers"]))
+    entries = result.get("InstanceTypes", []) if isinstance(result, dict) else []
+    if not isinstance(entries, list):
+        entries = []
+    for name in settings["workers"]:
+        selected = [entry for entry in entries if isinstance(entry, dict) and entry.get("InstanceType") == name]
+        processor = selected[0].get("ProcessorInfo") if len(selected) == 1 else None
+        architectures = processor.get("SupportedArchitectures") if isinstance(processor, dict) else None
+        if (len(selected) != 1 or selected[0].get("FreeTierEligible") is not True
+                or not isinstance(architectures, list) or "x86_64" not in architectures):
+            raise ValueError("Free plan requires explicitly FreeTierEligible x86_64 worker metadata for " + name
+                             + "; missing/false metadata stops deployment without changing account plan or instance type")
 
 
 def addon_builds(result, kubernetes="1.36"):
@@ -56,6 +152,7 @@ def validate_inputs(config):
     """Reject placeholders and account/routing mistakes before making an AWS call."""
     if not isinstance(config, dict):
         raise ValueError("Terraform inputs must be a JSON object")
+    profile_settings(config)
     cidrs = config.get("admin_cidrs")
     if not isinstance(cidrs, list) or not cidrs:
         raise ValueError("admin_cidrs requires at least one real public IPv4 /32")
@@ -102,7 +199,7 @@ def validate_inputs(config):
             not isinstance(value, str) or re.fullmatch(r"v[0-9].*-eksbuild\.[0-9]+", value) is None
             for value in versions.values()):
         raise ValueError("Pin complete compatible eksbuild versions for all four managed add-ons")
-    for key in ("mysql_multi_az", "create_opensearch_service_linked_role"):
+    for key in ("mysql_multi_az", "create_opensearch_service_linked_role", "deploy_production_node_group"):
         if key in config and type(config[key]) is not bool:
             raise ValueError(key + " must be a boolean")
     domain, zone = config.get("domain", ""), config.get("hosted_zone_id", "")
@@ -148,14 +245,15 @@ def check_state_bucket(account):
         raise ValueError("State bucket default encryption is missing or unsupported")
 
 
-def check_worker_offerings():
+def check_worker_offerings(settings=None):
     """Check advertised type/AZ combinations, not live spare EC2 capacity."""
+    workers = (settings or PROFILES["architecture"])["workers"]
     result = aws("ec2", "describe-instance-type-offerings", "--location-type", "availability-zone",
-                 "--filters", "Name=instance-type,Values=" + ",".join(sorted(WORKER_OFFERINGS)),
+                 "--filters", "Name=instance-type,Values=" + ",".join(sorted(workers)),
                  "Name=location,Values=ap-southeast-1a,ap-southeast-1b,ap-southeast-1c")
     available = {(item.get("InstanceType"), item.get("Location")) for item in result.get("InstanceTypeOfferings", [])
                  if item.get("LocationType") == "availability-zone"}
-    missing = sorted(instance + " in " + zone for instance, zones in WORKER_OFFERINGS.items()
+    missing = sorted(instance + " in " + zone for instance, zones in workers.items()
                      for zone in zones if (instance, zone) not in available)
     if missing:
         raise ValueError("Required worker instance/AZ offering is unavailable: " + ", ".join(missing))
@@ -205,7 +303,7 @@ def check_search_service_role(config):
                          "or provision it before planning.")
 
 
-def check_search_instance_limits(result):
+def check_search_instance_limits(result, volume_gib=SEARCH_VOLUME_GIB):
     """Reject unknown limits rather than assuming the selected domain is supported."""
     roles = result.get("LimitsByRole") if isinstance(result, dict) else None
     data = roles.get("data") if isinstance(roles, dict) else None
@@ -255,8 +353,8 @@ def check_search_instance_limits(result):
     maximum = sizes.get("MaximumVolumeSize", 0)
     if not 1 <= minimum <= maximum:
         raise ValueError("Missing or invalid OpenSearch EBS volume-size bounds")
-    if not minimum <= SEARCH_VOLUME_GIB <= maximum:
-        raise ValueError("Selected OpenSearch " + str(SEARCH_VOLUME_GIB)
+    if not minimum <= volume_gib <= maximum:
+        raise ValueError("Selected OpenSearch " + str(volume_gib)
                          + " GiB EBS volume is outside the regional " + SEARCH_STORAGE_TYPE + " limits")
 
 
@@ -317,12 +415,16 @@ def check_existing_role_boundaries(config):
 
 def check(config):
     account = validate_inputs(config)
+    settings = profile_settings(config)
     identity = aws("sts", "get-caller-identity")
     if identity.get("Account") != account:
         raise ValueError("AWS caller account differs from the configured administration account")
+    kind = check_account_plan(account, settings["name"])
+    if kind == "FREE":
+        check_free_worker_types(settings)
     check_iam_prerequisites(config)
     check_state_bucket(account)
-    check_worker_offerings()
+    check_worker_offerings(settings)
     versions = aws("eks", "describe-cluster-versions", "--cluster-versions", "1.36").get("clusterVersions", [])
     if not any(item.get("clusterVersion") == "1.36" and standard_support(item) for item in versions):
         raise ValueError("EKS 1.36 must be offered in Singapore under standard support")
@@ -336,19 +438,32 @@ def check(config):
     mysql = aws("rds", "describe-db-engine-versions", "--engine", "mysql", "--engine-version", "8.4.11")
     if not any(item.get("EngineVersion") == "8.4.11" and item.get("Status") == "available" for item in mysql.get("DBEngineVersions", [])):
         raise ValueError("RDS MySQL 8.4.11 is not available in Singapore")
-    options = aws("rds", "describe-orderable-db-instance-options", "--engine", "mysql", "--engine-version", "8.4.11", "--db-instance-class", config.get("mysql_instance_class", "db.t4g.small"))
-    if not options.get("OrderableDBInstanceOptions"):
-        raise ValueError("Selected MySQL instance class cannot run 8.4.11 in Singapore")
+    options = aws("rds", "describe-orderable-db-instance-options", "--engine", "mysql", "--engine-version", "8.4.11", "--db-instance-class", settings["mysql_instance_class"], "--storage-type", "gp3", "--vpc")
+    if not any(isinstance(item, dict) and item.get("DBInstanceClass") == settings["mysql_instance_class"]
+               and item.get("Engine") == "mysql" and item.get("EngineVersion") == "8.4.11"
+               and item.get("StorageType") == "gp3" and item.get("Vpc") is True
+               and item.get("SupportsStorageEncryption") is True
+               and type(item.get("MinStorageSize")) is int and type(item.get("MaxStorageSize")) is int
+               and item["MinStorageSize"] <= settings["mysql_storage_gib"] <= item["MaxStorageSize"]
+               and (not config.get("mysql_multi_az", False) or item.get("MultiAZCapable") is True)
+               for item in options.get("OrderableDBInstanceOptions", [])):
+        raise ValueError("Selected MySQL class/version/encrypted gp3 storage/Multi-AZ tuple is not orderable in Singapore")
     redis = aws("elasticache", "describe-cache-engine-versions", "--engine", "redis", "--engine-version", "7.1")
     if not redis.get("CacheEngineVersions"):
         raise ValueError("ElastiCache Redis OSS 7.1 is unavailable in Singapore")
     mq = aws("mq", "describe-broker-engine-types", "--engine-type", "RABBITMQ")
-    supported_mq = [version.get("name", "") for engine in mq.get("brokerEngineTypes", []) for version in engine.get("engineVersions", [])]
+    # Amazon MQ's CLI/SDK response members are PascalCase, unlike EKS.
+    supported_mq = [version.get("Name", "") for engine in mq.get("BrokerEngineTypes", [])
+                    if engine.get("EngineType") == "RABBITMQ" for version in engine.get("EngineVersions", [])]
     if not any(version == "4.2" or version.startswith("4.2.") for version in supported_mq):
         raise ValueError("Amazon MQ RabbitMQ 4.2 is unavailable in Singapore")
-    broker_options = aws("mq", "describe-broker-instance-options", "--engine-type", "RABBITMQ", "--host-instance-type", "mq.m7g.large")
-    if not any("CLUSTER_MULTI_AZ" in item.get("supportedDeploymentModes", []) for item in broker_options.get("brokerInstanceOptions", [])):
-        raise ValueError("mq.m7g.large does not offer CLUSTER_MULTI_AZ in Singapore")
+    broker_options = aws("mq", "describe-broker-instance-options", "--engine-type", "RABBITMQ", "--host-instance-type", settings["mq_instance_type"])
+    if not any(item.get("EngineType") == "RABBITMQ" and item.get("HostInstanceType") == settings["mq_instance_type"]
+               and settings["mq_mode"] in item.get("SupportedDeploymentModes", [])
+               and any(version == "4.2" or version.startswith("4.2.") for version in item.get("SupportedEngineVersions", []))
+               and settings["mq_zones"] <= {zone.get("Name") for zone in item.get("AvailabilityZones", [])}
+               for item in broker_options.get("BrokerInstanceOptions", [])):
+        raise ValueError(settings["mq_instance_type"] + " does not offer RabbitMQ 4.2 " + settings["mq_mode"] + " across the selected Singapore AZs")
     search = aws("opensearch", "list-versions")
     if SEARCH_ENGINE_VERSION not in search.get("Versions", []):
         raise ValueError("Amazon OpenSearch 3.3 is unavailable in Singapore")
@@ -358,7 +473,7 @@ def check(config):
     except subprocess.CalledProcessError as error:
         raise ValueError("Cannot verify OpenSearch " + SEARCH_INSTANCE_TYPE + " / " + SEARCH_ENGINE_VERSION
                          + " in Singapore: DescribeInstanceTypeLimits failed; check regional support and IAM permissions") from error
-    check_search_instance_limits(limits)
+    check_search_instance_limits(limits, settings["search_volume_gib"])
     check_search_service_role(config)
     # Only metadata is read; preflight never retrieves credential values.
     for arn in config["platform_secret_arns"].values():
@@ -372,21 +487,29 @@ def main():
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--tfvars", type=Path, help="JSON tfvars containing ARNs and configuration only")
     mode.add_argument("--boundary-account-id", help="Recheck the live admin boundary immediately before applying a saved plan")
+    parser.add_argument("--reviewed-plan", type=Path, help="Already checksum-verified binary plan; bind account/worker gates to its actual profile")
     args = parser.parse_args()
+    if args.reviewed_plan and not args.boundary_account_id:
+        raise ValueError("--reviewed-plan requires --boundary-account-id")
     if args.boundary_account_id:
         account = args.boundary_account_id
         if re.fullmatch(r"[0-9]{12}", account) is None or account in {"000000000000", "123456789012"}:
             raise ValueError("Supply the real account recorded in reviewed plan metadata")
         if aws("sts", "get-caller-identity").get("Account") != account:
             raise ValueError("AWS caller account differs from the reviewed plan account")
+        settings = reviewed_plan_settings(args.reviewed_plan) if args.reviewed_plan else profile_settings({"deployment_profile": "architecture"})
+        kind = check_account_plan(account, settings["name"])
+        if kind == "FREE":
+            check_free_worker_types(settings)
+            check_worker_offerings(settings)
         config = {"admin_role_arn": "arn:aws:iam::" + account + ":role/retail-lab-terraform",
                   "terraform_workload_boundary_arn": "arn:aws:iam::" + account + ":policy/retail-lab-workload-boundary"}
         check_workload_boundary(config)
         check_existing_role_boundaries(config)
-        print("Reviewed account and live admin-owned workload boundary passed before saved-plan apply.")
+        print("Reviewed account, profile account-plan eligibility and live admin-owned workload boundary passed before saved-plan apply.")
         return
     check(json.loads(args.tfvars.read_text(encoding="utf-8-sig")))
-    print("Account, state bucket metadata, worker AZ offerings and regional EKS/add-on/backend prerequisites passed.")
+    print("Account, profile account-plan eligibility, state bucket metadata, worker AZ offerings and regional EKS/add-on/backend prerequisites passed.")
     print("Native state-lock write/delete permissions are verified when Terraform plan acquires the .tflock; metadata checks do not prove them.")
 
 

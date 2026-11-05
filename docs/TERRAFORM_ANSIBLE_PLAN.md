@@ -1,18 +1,24 @@
 # Kế hoạch hoàn thiện Terraform và Ansible cho Retail AWS lab
 
-Ngày rà soát: 02/11/2026; cập nhật Ansible: 04/11/2026. Đây là kế hoạch viết và kiểm chứng code, chưa phải biên bản triển khai AWS.
+Ngày rà soát: 02/11/2026; cập nhật hướng lab tạm thời và cleanup AWS: 05/11/2026. Đây là kế hoạch code kèm bằng chứng chạy thật từng phần, chưa phải nghiệm thu ứng dụng.
 
-**Phương án chốt: giữ Terraform hiện có, bổ sung Ansible cho bootstrap và kiểm tra, tiếp tục dùng Argo CD để đồng bộ ứng dụng.** Một EKS và các backend dùng chung có một Terraform root/state; dev/prod tách bằng node group, namespace, database/user và values GitOps.
+**Hướng hiện tại: dựng lab cần thiết → kiểm chứng → teardown, giữ IAM/state để tái sử dụng.** Terraform mặc định profile `lab` nhỏ và chỉ có dev; profile `architecture` giữ thiết kế đầy đủ để chọn rõ khi cần. Ansible bootstrap/kiểm tra, Argo CD đồng bộ ứng dụng. Xem [profile và vòng đời](DEV_DEPLOYMENT.md).
 
-Tiến độ sau [đợt đối chiếu lỗi hạ tầng](INFRASTRUCTURE_REVIEW.md): đã sửa trạng thái API EKS, role OpenSearch, dependency NAT, thêm S3 Gateway Endpoint và sửa quyền RabbitMQ/bulk OpenSearch. Đã kiểm chứng 6 nhóm permission smoke trên backend thật trong fixture; chưa triển khai AWS.
+Tiến độ sau [đợt đối chiếu lỗi hạ tầng](INFRASTRUCTURE_REVIEW.md): đã sửa trạng thái API EKS, role OpenSearch, dependency NAT, thêm S3 Gateway Endpoint và sửa quyền RabbitMQ/bulk OpenSearch. Đã kiểm chứng 6 nhóm permission smoke trên backend thật trong fixture. Account AWS đã bootstrap nền, import IAM vào state và bắt đầu cold apply; EKS control plane cùng một phần network/IAM/S3 đã tạo, nhưng backend và ứng dụng chưa bootstrap.
 
-**Cập nhật hoàn thiện Terraform trước Ansible:** đã thêm kiểm tra input/account/IAM/state bucket/AZ; runner hỗ trợ BOM, kubeconfig riêng, Complete/Failed/timeout, Lease chống chạy song song và báo cáo JSON; có policy renderer chia phần theo giới hạn IAM, chế độ workflow validate-only và artifact outputs đã allowlist. Kiểm tra mới đạt 76 test Python, 20 test Terraform giả lập và actionlint. Xem [hướng dẫn account AWS mới](AWS_FIRST_DEPLOYMENT.md). Bảng vấn đề dưới đây ghi căn cứ ban đầu, không phải mọi dòng đều còn chưa sửa.
+**Cập nhật hoàn thiện Terraform trước Ansible:** đã thêm kiểm tra input/account/IAM/state bucket/AZ; runner hỗ trợ BOM, kubeconfig riêng, Complete/Failed/timeout, Lease chống chạy song song và báo cáo JSON; có policy renderer chia phần theo giới hạn IAM, chế độ workflow validate-only và artifact outputs đã allowlist. Mốc kiểm chứng ban đầu của đợt này đạt 76 test Python, 20 test Terraform giả lập và actionlint; kết quả mới nhất được ghi bên dưới. Xem [hướng dẫn account AWS mới](AWS_FIRST_DEPLOYMENT.md). Bảng vấn đề dưới đây ghi căn cứ ban đầu, không phải mọi dòng đều còn chưa sửa.
 
 **Ansible đã được triển khai:** chín playbook, inventory localhost, dependency lock, preflight account/cluster/receipt, kubeconfig riêng, backend Job runner, GitOps candidate cô lập, bootstrap ESO/Argo CD, verify readiness và ba playbook vận hành rotation/restore/monitoring-backup acceptance. Xem [runbook](../ansible/README.md). Workflow `Retail Ansible` chỉ kiểm tra offline, không tự provision AWS.
 
-Kiểm chứng cuối ngày 04/11/2026: 163 test hạ tầng, 60 helper test Ansible trên Linux và 23 native Terraform test đạt; syntax-check cả chín playbook, preflight thực chạy offline changed=0, ansible-lint không lỗi/cảnh báo và hai workflow qua actionlint. Lockfile Python 3.12/Linux x86_64 và exact Alpine Job image đã được kiểm thử.
+Kiểm chứng cập nhật ngày 04/11/2026: **196 test hạ tầng trên Ubuntu WSL, không skip**, 60 helper test Ansible trên Linux và **25 native Terraform test** đạt; syntax-check cả chín playbook, preflight Ansible thực chạy offline changed=0, ansible-lint không lỗi/cảnh báo và hai workflow qua actionlint. Lockfile Python 3.12/Linux x86_64 và exact Alpine Job image đã được kiểm thử. AWS CLI/toolchain, Ansible venv và Kubernetes collection đã cài trên controller WSL.
 
-Chưa có AWS CLI/profile hoặc IAM/OIDC thật được nối trong phiên làm việc. IAM template đã đối chiếu tên action/resource-scope với metadata AWS công khai nhưng chưa chạy Access Analyzer trong account. Cần bootstrap account, live preflight, review plan và cold apply để nghiệm thu AWS. Redis node-type orderability mới chỉ kiểm tra được engine metadata trước khi có cluster; không suy thành bằng chứng capacity.
+Đã đăng nhập IAM user và xác minh STS của **operator assumed role**. Ở mốc kiểm chứng IAM ban đầu, cả năm document (bốn phần CI và boundary) qua AWS Access Analyzer với `findings: []`; bốn ca Policy Simulator cho self-role Deny, bounded CreateRole Allow, unbounded CreateRole Deny và runtime escalation Deny đều đúng kỳ vọng. Full preflight trước account-plan gate đã đạt các kiểm tra state/IAM, version/add-on và metadata backend. Lượt API thật giúp sửa parser MQ sang PascalCase; tập key S3 tĩnh giúp import Terraform role/policy attachments vào remote state thành công. Source còn thay đổi chưa commit; kết quả validation này không chứng minh cold apply đã hoàn tất.
+
+**Trạng thái cold apply:** EKS control plane và một phần network/IAM/S3 đã tạo. Free plan từ chối loại EC2 worker `m6i` và retention RDS 7 ngày (`FreeTierRestrictionError`); IAM cũng từ chối default tag trên OpenSearch service-linked role. Apply đã dừng có kiểm soát, state được giữ lại và ASG hiện chưa có instance. Source đã sửa quyền tag cho đúng service-linked role và giới hạn quyền tạo RDS với MySQL 8.4 default option group; cần admin cập nhật policy rồi review plan mới. Chưa chạy Job bootstrap backend/ứng dụng trong VPC và chưa nâng account plan. Tài nguyên đã tạo vẫn tồn tại; dừng apply không có nghĩa đã dừng hoặc xóa toàn bộ hạ tầng.
+
+**Rào chắn theo profile:** sau STS, create preflight yêu cầu đúng account và trạng thái `ACTIVE`; `lab` cho phép Free/Paid nhưng kiểm eligibility/amd64/AZ của worker trên Free, còn `architecture` cần Paid. Saved-plan apply lấy profile từ binary đã verify, không nhận override để bỏ qua gate. Metadata thiếu/không biết hoặc API lỗi đều chặn; không tự upgrade. Teardown không đòi nâng Paid để xóa tài nguyên. [Profile lab](DEV_DEPLOYMENT.md) đã có trong code và qua kiểm thử; backend Free mới chưa live apply nên catalog/orderability không thay nghiệm thu runtime.
+
+**Cleanup ngày 05/11:** đã kiểm tra và dọn phần lab còn sót sau thao tác xóa của người dùng. Không còn tài nguyên chạy/network/backend/storage dữ liệu của lab; IAM và bucket state được giữ. Secret cũ đang chờ xóa theo lịch AWS. State cần đối chiếu/handoff trước phiên dựng kế tiếp; không apply lại một create plan cũ để dọn tài nguyên.
 
 ## 1. Căn cứ và hiện trạng
 
@@ -23,10 +29,10 @@ Chưa có AWS CLI/profile hoặc IAM/OIDC thật được nối trong phiên là
 | [Workflow Terraform](../.github/workflows/terraform.yml) | Đã có validate, plan và apply saved plan riêng; kiểm tra commit/run/attempt/checksum/thời hạn |
 | [Backend helpers](../scripts/infra/) | Đã có khởi tạo credential nền, preflight, Job bootstrap backend trong VPC và test |
 | [GitOps đã publish](https://github.com/hoi3dkhoiche-byte/DevOps-retails-shop-gitops/tree/b241c004b3a45409cb8a38e80c4bfc4bd8c0c0af) | Đã có chart platform/app, metadata prepare, bootstrap ESO/Argo CD, digest dev; AWS deployment và prod release đang tắt |
-| Ansible | Đã có chín playbook và role/helper tại `ansible/`; kiểm chứng offline trên Linux, chưa chạy AWS thật |
-| Kiểm tra code hiện tại | 163 test hạ tầng, 60 helper test Ansible, 23 native Terraform test và lint đạt; chưa chạy preflight bằng tài khoản AWS, Terraform plan/apply hay bootstrap thật |
+| Ansible | Đã có chín playbook và role/helper tại `ansible/`; controller WSL/dependencies cài xong, kiểm chứng offline trên Linux; các playbook backend/cluster chưa chạy trên EKS thật |
+| Kiểm tra hiện tại | 196 test hạ tầng trên WSL không skip, 60 helper test Ansible, 25 native Terraform test và lint đạt; IAM/STS/import nền đã kiểm chứng; cold apply tạo một phần hạ tầng rồi dừng vì Free plan và SLR tag, state được giữ; chưa bootstrap backend/ứng dụng |
 
-13 test hiện tại không phủ đầy đủ response API AWS: ví dụ test EKS đang giả lập `status` khác schema hiện hành. Cần bổ sung ca lỗi thực tế trước khi coi bootstrap sẵn sàng chạy.
+Nhận xét về 13 test và fixture `status` thuộc bản rà soát ban đầu. Bộ hiện tại đã thêm response EKS mới/cũ và MQ PascalCase thực tế; full preflight live đã qua. Các test này vẫn không thay bằng chứng tạo tài nguyên và bootstrap thành công trên AWS.
 
 ## 2. Quyền quản lý của từng công cụ
 
@@ -65,7 +71,7 @@ AWS phân biệt `status` cũ dạng `standard-support` và `versionStatus` dạ
 
 Giữ root `infra/retail-lab` và địa chỉ resource hiện có. Chưa cần chuyển tất cả sang module: đổi cấu trúc lớn lúc này không giải quyết các lỗi triển khai đã tìm thấy.
 
-1. **Bootstrap tài khoản có runbook cụ thể:** xác minh bucket `manhnguyen1131` thực sự thuộc account, cùng region và đã được bảo vệ; xác minh OIDC/trust và policy của role Terraform. Soạn policy mẫu có thể review tại `infra/retail-lab/policies/terraform-infra.json`: quyền state/lock, API preflight, lifecycle resource, IAM/PassRole và CloudFormation đọc dynamic secret; giới hạn account/region/resource ở các action hỗ trợ. Không dùng `AdministratorAccess` làm mặc định. Nếu tài nguyên chưa tồn tại, operator tạo theo runbook rồi adopt/import đúng địa chỉ Terraform hiện có. Không để Ansible và Terraform cùng liên tục sửa IAM/bucket. Không tạo root dev/prod riêng làm trùng tài nguyên dùng chung.
+1. **Bootstrap tài khoản có runbook cụ thể:** trước khi tạo tài nguyên, xác minh STS và account plan `PAID`/`ACTIVE` tại API Free Tier ở `us-east-1`; Free/metadata không xác minh được thì dừng, không tự nâng plan. Sau đó xác minh bucket `manhnguyen1131` thực sự thuộc account, cùng region và đã được bảo vệ; xác minh OIDC/trust và policy của role Terraform. Soạn policy mẫu có thể review tại `infra/retail-lab/policies/terraform-infra.json`: quyền state/lock, API preflight, lifecycle resource, IAM/PassRole và CloudFormation đọc dynamic secret; giới hạn account/region/resource ở các action hỗ trợ. Không dùng `AdministratorAccess` làm mặc định. Nếu tài nguyên chưa tồn tại, operator tạo theo runbook rồi adopt/import đúng địa chỉ Terraform hiện có. Không để Ansible và Terraform cùng liên tục sửa IAM/bucket. Không tạo root dev/prod riêng làm trùng tài nguyên dùng chung.
 2. **Đầu vào có validation:** account/role/ARN cùng đích; public admin `/32`; domain đi cùng hosted zone; các instance/storage/HA cần điều chỉnh có kiểu và ràng buộc. Giữ giá trị mặc định theo thiết kế. Khi thêm biến phải sửa đồng bộ `variables.tf`, tfvars ví dụ, `write_tfvars.py` allowlist, preflight và test.
 3. **Preflight phản ánh đúng cấu hình:** engine version/add-on được pin; truy vấn khả dụng tại Singapore bằng API thật trước plan. Kiểm tra instance/AZ/quota theo API từng dịch vụ, ghi rõ những gì AWS không cung cấp bằng kiểm tra read-only. Instance được chào bán không bảo đảm capacity lúc apply.
 4. **Network/IAM:** kiểm tra thứ tự egress cho private node, IAM cho CNI/Pod SG và mapping ServiceAccount/IRSA. Giữ API public giới hạn IP quản trị, backend private và MQ chỉ mở AMQPS cho Orders pod SG.
@@ -123,7 +129,7 @@ Helm module có cảnh báo về nhận diện thay đổi khi dùng `chart_repo
 
 | Bước | Playbook/công cụ | Dữ liệu vào và thao tác | Điều kiện chuyển bước |
 | --- | --- | --- | --- |
-| 0 | Runbook account + `preflight.yml` trước Terraform | Profile/account, state bucket, role/OIDC, công cụ và cấu hình dự kiến | Sai account/quyền/IP/version thì dừng; chỉ kiểm tra tài nguyên chưa tạo theo khả năng giai đoạn này |
+| 0 | Runbook account + `preflight.yml` trước Terraform | Profile/account; API account plan trước resource bootstrap; state bucket, role/OIDC, công cụ và cấu hình dự kiến | Account không phải `PAID`/`ACTIVE`, metadata chưa xác minh hoặc sai quyền/IP/version thì dừng |
 | 1 | `init-platform.yml` | Gọi `bootstrap_backends.py init-platform` bằng quyền operator | Bốn credential nền có AWSCURRENT; file kết quả chỉ có ARN; chạy lại giữ password |
 | 2 | Workflow Terraform | Regional preflight → plan → review → apply saved plan | Đúng commit/hash/attempt/role; apply thành công |
 | 3 | Xuất outputs + `preflight.yml` sau Terraform | Đọc output bằng UTF-8/BOM-safe; kiểm tra account/cluster ARN/endpoint, node, add-on, context | File hợp lệ, EKS đúng đích và trạng thái đủ chạy bootstrap |

@@ -23,6 +23,12 @@ platform_secret_arns = {
 domain         = ""
 hosted_zone_id = ""
 
+# Recommended for create -> verify -> delete lab sessions. Explicitly choose
+# architecture to retain the original full sizing, three-AZ MQ and DB backups.
+deployment_profile = "lab"
+# Optional architecture override; lab never creates production workers.
+# deploy_production_node_group = false
+
 # Keep false when OpenSearch or the legacy Elasticsearch service-linked role
 # already exists in this account. A fresh account can set true to create it.
 # To manage an existing modern role instead of reusing it, import its ARN into

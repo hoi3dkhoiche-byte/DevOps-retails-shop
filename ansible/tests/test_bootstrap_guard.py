@@ -76,6 +76,40 @@ class BootstrapGuardTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "disabled"):
             self.contract()
 
+    def test_legacy_profile_keeps_full_platform_and_one_values_file(self):
+        result = self.contract()
+        self.assertEqual(result["deployment_profile"], "architecture")
+        self.assertEqual(len(result["platform_applications"]), 9)
+        self.assertEqual(result["charts"]["argo-cd"]["values_files"], [str(self.repo / "platform/argo-cd.yaml")])
+
+    def test_lab_bootstrap_and_argo_handoff_use_the_same_overlays(self):
+        self.config["deploymentProfile"] = "lab"
+        for chart in self.versions:
+            overlay = self.repo / "profiles/lab" / f"{chart}.yaml"
+            overlay.parent.mkdir(parents=True, exist_ok=True)
+            overlay.write_text("resources: {}\n", encoding="utf-8")
+        self.write()
+        result = guard.build_contract(self.repo, "111122223333", "ap-southeast-1", "retail-lab-eks", "lab")
+        self.assertEqual(len(result["charts"]["argo-cd"]["values_files"]), 2)
+        self.assertEqual(result["eso_sources"][0]["helm"]["valueFiles"],
+                         ["$values/platform/external-secrets.yaml", "$values/profiles/lab/external-secrets.yaml"])
+        self.assertFalse({"loki", "alloy", "velero", "cluster-autoscaler"} & set(result["platform_applications"]))
+
+    def test_profile_mismatch_or_missing_lab_overlay_stops_bootstrap(self):
+        with self.assertRaisesRegex(ValueError, "differs"):
+            guard.build_contract(self.repo, "111122223333", "ap-southeast-1", "retail-lab-eks", "lab")
+        self.config["deploymentProfile"] = "lab"
+        self.write()
+        with self.assertRaisesRegex(ValueError, "Missing lab"):
+            self.contract()
+
+    def test_invalid_profile_is_rejected_before_chart_selection(self):
+        for profile in (True, "lean", None):
+            self.config["deploymentProfile"] = profile
+            self.write()
+            with self.subTest(profile=profile), self.assertRaisesRegex(ValueError, "profile"):
+                self.contract()
+
     def test_wrong_account_is_rejected(self):
         self.config["accountId"] = "999988887777"
         self.write()

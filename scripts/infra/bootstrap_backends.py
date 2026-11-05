@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 import secrets
 import ssl
+import string
 import sys
 from urllib.parse import quote, urlparse
 import urllib.request
@@ -55,10 +56,24 @@ def write_secret(client, arn, value):
     client.put_secret_value(SecretId=arn, SecretString=json.dumps(value, separators=(",", ":")))
 
 
+def generate_password():
+    """Generate a 48-character password satisfying backend character rules."""
+    # Explicit classes avoid probabilistic OpenSearch master/internal-user
+    # rejection. This alphabet also avoids MQ's reserved comma/colon/equals.
+    groups = (string.ascii_uppercase, string.ascii_lowercase, string.digits, "!#$%*+?-_")
+    alphabet = "".join(groups)
+    characters = [secrets.choice(group) for group in groups]
+    characters.extend(secrets.choice(alphabet) for _ in range(44))
+    for index in range(len(characters) - 1, 0, -1):
+        other = secrets.randbelow(index + 1)
+        characters[index], characters[other] = characters[other], characters[index]
+    return "".join(characters)
+
+
 def credentials(client, identifier, username, extra=None, create_metadata=False):
     value, arn = read_secret(client, identifier, create_metadata=create_metadata)
     if value is None:
-        value = {"username": username, "password": secrets.token_urlsafe(36)}
+        value = {"username": username, "password": generate_password()}
     if value.get("username") != username or not isinstance(value.get("password"), str) or len(value["password"]) < 16:
         raise ValueError("Credential username/password does not match the documented service account")
     updated = dict(value, **(extra or {}))
@@ -72,7 +87,23 @@ def credentials(client, identifier, username, extra=None, create_metadata=False)
     return updated, arn
 
 
-def init_platform(client, output):
+def init_platform(client, output, restore_scheduled_platform_secrets=False):
+    if restore_scheduled_platform_secrets:
+        # Only the four fixed pre-Terraform names can be restored here. Never
+        # accept arbitrary names/ARNs or restore application/monitoring secrets.
+        for name, _ in PLATFORM.values():
+            try:
+                metadata = client.describe_secret(SecretId=name)
+            except Exception as error:
+                if getattr(error, "response", {}).get("Error", {}).get("Code") != "ResourceNotFoundException":
+                    raise
+                continue
+            if not isinstance(metadata, dict) or metadata.get("Name", name) != name:
+                raise ValueError("Unexpected platform secret metadata")
+            if metadata.get("DeletedDate"):
+                client.restore_secret(SecretId=name)
+        # The normal credential path rechecks DeletedDate before reading or
+        # writing values. A failed/eventually-consistent restore fails closed.
     result = {}
     for key, (name, username) in PLATFORM.items():
         _, result[key] = credentials(client, name, username, create_metadata=True)
@@ -226,11 +257,15 @@ def main():
     parser.add_argument("--terraform-output", type=Path)
     parser.add_argument("--rds-ca", type=Path, default=Path("gitops/applications/files/rds-ca.pem"))
     parser.add_argument("--arn-output", type=Path, default=Path(".ci-tools/platform-secret-arns.json"))
+    parser.add_argument("--restore-scheduled-platform-secrets", action="store_true",
+                        help="Explicitly cancel scheduled deletion of only the four fixed init-platform secrets before reuse")
     args = parser.parse_args()
+    if args.restore_scheduled_platform_secrets and args.operation != "init-platform":
+        parser.error("--restore-scheduled-platform-secrets requires init-platform")
     import boto3
     client = boto3.client("secretsmanager", region_name=REGION)
     if args.operation == "init-platform":
-        init_platform(client, args.arn_output)
+        init_platform(client, args.arn_output, restore_scheduled_platform_secrets=args.restore_scheduled_platform_secrets)
     else:
         if not args.terraform_output:
             parser.error("configure requires --terraform-output")

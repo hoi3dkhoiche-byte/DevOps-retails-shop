@@ -17,6 +17,10 @@ PR dev chỉ thay `environments/dev/images.yaml`. Mỗi release có nhánh autom
 
 ## Nghiệm thu dev và promote prod
 
+Lab mặc định chỉ triển khai dev. Job tạo PR production còn yêu cầu Actions Variable `GITOPS_PRODUCTION_ENABLED=true`, ngoài `GITOPS_ENABLED=true`; để trống hoặc `false` khi chạy lab tạm thời. Chỉ bật production sau khi chọn profile `architecture`, tạo worker production và nghiệm thu dev. CI ứng dụng vẫn build, test, scan và publish cùng bộ năm image; bật GitOps chỉ tạo PR, không tự dựng AWS.
+
+`deployment_profile` (`lab`/`architecture`) điều khiển quy mô hạ tầng và platform. Nó khác `backend_profile=mysql-redis-opensearch` trong release image; hợp đồng backend và digest của năm image được giữ nguyên.
+
 Sau khi dev đã sync và UI Rollout đã hoàn tất promotion, chạy từ máy quản trị có kubeconfig và Docker buildx. Nếu image private, Docker cần đăng nhập registry trước. `--context` luôn phải truyền rõ để tránh kiểm thử nhầm cluster:
 
 ```bash

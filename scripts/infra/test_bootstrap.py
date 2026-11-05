@@ -1,4 +1,5 @@
 import copy
+from contextlib import redirect_stderr, redirect_stdout
 import io
 import json
 from pathlib import Path
@@ -30,9 +31,109 @@ class SecretStore:
         self.values[SecretId] = json.loads(SecretString)
 
 
+class ScheduledSecretStore(SecretStore):
+    def __init__(self):
+        super().__init__()
+        self.scheduled = {name for name, _ in bootstrap.PLATFORM.values()} | {"/retail/prod/orders/mysql"}
+
+    def describe_secret(self, SecretId):
+        metadata = dict(super().describe_secret(SecretId), Name=SecretId)
+        if SecretId in self.scheduled:
+            metadata["DeletedDate"] = "scheduled-for-deletion"
+        return metadata
+
+    def restore_secret(self, SecretId):
+        self.scheduled.remove(SecretId)
+
+
 class BootstrapTests(unittest.TestCase):
     def setUp(self):
         self.store = SecretStore()
+
+    def test_scheduled_platform_secrets_fail_by_default_without_restore_or_overwrite(self):
+        store = ScheduledSecretStore()
+        before = copy.deepcopy(store.values)
+        with tempfile.TemporaryDirectory() as temporary, patch.object(store, "restore_secret", wraps=store.restore_secret) as restore, \
+                patch.object(store, "put_secret_value", wraps=store.put_secret_value) as write, self.assertRaisesRegex(ValueError, "scheduled for deletion"):
+            bootstrap.init_platform(store, Path(temporary) / "arns.json")
+        restore.assert_not_called()
+        write.assert_not_called()
+        self.assertTrue(store.values == before, "Scheduled credentials must not be overwritten")
+
+    def test_explicit_restore_only_touches_four_platform_names_and_reuses_existing_values(self):
+        store = ScheduledSecretStore()
+        before = copy.deepcopy(store.values)
+        expected = {name for name, _ in bootstrap.PLATFORM.values()}
+        capture = io.StringIO()
+        with tempfile.TemporaryDirectory() as temporary, redirect_stdout(capture), \
+                patch.object(store, "restore_secret", wraps=store.restore_secret) as restore, \
+                patch.object(store, "put_secret_value", wraps=store.put_secret_value) as write:
+            output = Path(temporary) / "arns.json"
+            bootstrap.init_platform(store, output, restore_scheduled_platform_secrets=True)
+            bootstrap.init_platform(store, output, restore_scheduled_platform_secrets=True)
+            self.assertEqual({call.kwargs["SecretId"] for call in restore.call_args_list}, expected)
+            self.assertEqual(restore.call_count, 4, "Repeated initialization must not restore already active secrets")
+            self.assertEqual(store.scheduled, {"/retail/prod/orders/mysql"})
+            write.assert_not_called()
+            self.assertTrue(store.values == before, "Restoration must reuse exact current credential values")
+            self.assertEqual(set(json.loads(output.read_text())), set(bootstrap.PLATFORM))
+            for name in expected:
+                self.assertTrue(store.values[name]["password"] not in capture.getvalue() + output.read_text())
+
+    def test_restore_opt_in_rejects_unexpected_metadata_and_unconfirmed_restoration(self):
+        store = ScheduledSecretStore()
+        with tempfile.TemporaryDirectory() as temporary, \
+                patch.object(store, "restore_secret") as restore, self.assertRaisesRegex(ValueError, "scheduled for deletion"):
+            bootstrap.init_platform(store, Path(temporary) / "arns.json", restore_scheduled_platform_secrets=True)
+        self.assertEqual(restore.call_count, 4)
+        with tempfile.TemporaryDirectory() as temporary, patch.object(store, "describe_secret", return_value={
+                "Name": "/retail/prod/orders/mysql", "DeletedDate": "scheduled"}), \
+                patch.object(store, "restore_secret") as restore, self.assertRaisesRegex(ValueError, "Unexpected platform"):
+            bootstrap.init_platform(store, Path(temporary) / "arns.json", restore_scheduled_platform_secrets=True)
+        restore.assert_not_called()
+
+    def test_restore_flag_is_only_valid_for_init_platform_before_any_aws_client(self):
+        with patch("sys.argv", ["bootstrap_backends.py", "configure", "--restore-scheduled-platform-secrets"]), \
+                redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as result:
+            bootstrap.main()
+        self.assertEqual(result.exception.code, 2)
+
+    def test_generated_password_keeps_required_classes_with_poor_random_choices(self):
+        with patch.object(bootstrap.secrets, "choice", side_effect=lambda alphabet: alphabet[0]), \
+                patch.object(bootstrap.secrets, "randbelow", return_value=0):
+            value = bootstrap.generate_password()
+        self.assertTrue(len(value) == 48, "Generated password must retain the intended length")
+        for pattern in (r"[A-Z]", r"[a-z]", r"[0-9]", r"[^A-Za-z0-9]"):
+            self.assertTrue(bool(re.search(pattern, value)), "A required password class is missing")
+        self.assertTrue(all(character not in value for character in ',:=/\\\" '), "Backend-reserved characters must be excluded")
+
+    def test_first_platform_initialization_writes_current_credentials_without_exposing_them(self):
+        for name, _ in bootstrap.PLATFORM.values():
+            self.store.values[name] = None
+        capture = io.StringIO()
+        with tempfile.TemporaryDirectory() as temporary, redirect_stdout(capture), \
+                patch.object(self.store, "put_secret_value", wraps=self.store.put_secret_value) as write:
+            output = Path(temporary) / "platform-arns.json"
+            bootstrap.init_platform(self.store, output)
+            self.assertEqual(write.call_count, len(bootstrap.PLATFORM))
+            self.assertEqual(json.loads(output.read_text()), {key: name for key, (name, _) in bootstrap.PLATFORM.items()})
+            for name, username in bootstrap.PLATFORM.values():
+                value = self.store.values[name]
+                self.assertTrue(value["username"] == username)
+                self.assertTrue(all(re.search(pattern, value["password"]) for pattern in (r"[A-Z]", r"[a-z]", r"[0-9]", r"[^A-Za-z0-9]")))
+                self.assertTrue(value["password"] not in output.read_text() + capture.getvalue(), "Generated credentials must stay out of output")
+
+    def test_existing_credentials_are_reused_without_generating_or_rewriting_passwords(self):
+        name, username = bootstrap.PLATFORM["search_admin"]
+        before = copy.deepcopy(self.store.values[name])
+        # An older password need not satisfy the new generation policy; rerun
+        # must not silently rotate it or break a backend already using it.
+        with patch.object(bootstrap, "generate_password", side_effect=AssertionError("Unexpected credential rotation")), \
+                patch.object(self.store, "put_secret_value", wraps=self.store.put_secret_value) as write:
+            value, arn = bootstrap.credentials(self.store, name, username)
+        self.assertTrue(value == before and self.store.values[name] == before, "Existing secret must be preserved")
+        self.assertEqual(arn, name)
+        write.assert_not_called()
 
     def test_six_mysql_schemas_and_users_remain_separate_and_idempotent(self):
         cursor = Mock()

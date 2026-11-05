@@ -38,15 +38,77 @@ class TerraformPolicyTests(unittest.TestCase):
 
     def test_self_role_mutation_is_explicitly_denied_but_metadata_can_refresh(self):
         role = "arn:aws:iam::111122223333:role/retail-lab-terraform"
+        statements = [item for part in self.parts for item in part["Statement"]]
         actions = ("iam:CreateRole", "iam:DeleteRole", "iam:UpdateRole", "iam:UpdateAssumeRolePolicy",
                    "iam:AttachRolePolicy", "iam:DetachRolePolicy", "iam:PutRolePolicy", "iam:DeleteRolePolicy",
-                   "iam:PutRolePermissionsBoundary", "iam:DeleteRolePermissionsBoundary", "iam:TagRole", "iam:PassRole")
+                   "iam:PutRolePermissionsBoundary", "iam:DeleteRolePermissionsBoundary", "iam:TagRole", "iam:PassRole",
+                   "iam:UpdateRoleDescription", "iam:UntagRole")
         for action in actions:
+            for context in ({}, {"iam:PermissionsBoundary": "arn:aws:iam::111122223333:policy/retail-lab-workload-boundary",
+                                 "iam:PolicyARN": "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy",
+                                 "iam:PassedToService": "eks.amazonaws.com"}):
+                with self.subTest(action=action, context=context):
+                    self.assertEqual(decision(statements, action, role, context), "explicitDeny")
+        for action in ("iam:GetRole", "iam:ListAttachedRolePolicies", "iam:ListRolePolicies", "iam:GetRolePolicy"):
             with self.subTest(action=action):
-                self.assertTrue(any(s["Resource"] == role for s in self.statements_for(action, "Deny")))
-        for action in ("iam:GetRole", "iam:ListAttachedRolePolicies", "iam:ListRolePolicies"):
-            self.assertFalse(self.statements_for(action, "Deny"))
-            self.assertTrue(self.statements_for(action, "Allow"))
+                self.assertEqual(decision(statements, action, role), "allowed")
+
+    def test_self_policy_refresh_does_not_open_unrelated_role_policy_reads(self):
+        statements = [item for part in self.parts for item in part["Statement"]]
+        for action in ("iam:ListAttachedRolePolicies", "iam:ListRolePolicies", "iam:GetRolePolicy"):
+            for role in ("arn:aws:iam::111122223333:role/retail-lab-terraform-unexpected",
+                         "arn:aws:iam::111122223333:role/unrelated-admin",
+                         "arn:aws:iam::999988887777:role/retail-lab-terraform"):
+                with self.subTest(action=action, role=role):
+                    self.assertEqual(decision(statements, action, role), "implicitDeny")
+
+    def test_opensearch_service_linked_role_tags_do_not_grant_other_service_or_iam_permissions(self):
+        statements = [item for part in self.parts for item in part["Statement"]]
+        role = "arn:aws:iam::111122223333:role/aws-service-role/opensearchservice.amazonaws.com/AWSServiceRoleForAmazonOpenSearchService"
+        for action in ("iam:TagRole", "iam:UntagRole"):
+            self.assertEqual(decision(statements, action, role), "allowed")
+            for other in (role.replace("111122223333", "999988887777"), role + "-unreviewed",
+                          "arn:aws:iam::111122223333:role/aws-service-role/elasticloadbalancing.amazonaws.com/AWSServiceRoleForElasticLoadBalancing",
+                          "arn:aws:iam::111122223333:role/aws-service-role/es.amazonaws.com/AWSServiceRoleForAmazonElasticsearchService"):
+                with self.subTest(action=action, resource=other):
+                    self.assertEqual(decision(statements, action, other), "implicitDeny")
+        for action in ("iam:PutRolePolicy", "iam:AttachRolePolicy", "iam:UpdateAssumeRolePolicy",
+                       "iam:DeleteRole", "iam:PutRolePermissionsBoundary", "iam:PassRole"):
+            for context in ({}, {"iam:PermissionsBoundary": "arn:aws:iam::111122223333:policy/retail-lab-workload-boundary",
+                                 "iam:PolicyARN": "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy",
+                                 "iam:PassedToService": "eks.amazonaws.com"}):
+                with self.subTest(action=action, context=context):
+                    self.assertNotEqual(decision(statements, action, role, context), "allowed")
+
+    def test_mysql_create_can_authorize_its_default_option_group_only_in_the_lab_region(self):
+        statements = [item for part in self.parts for item in part["Statement"]]
+        group = "arn:aws:rds:ap-southeast-1:111122223333:og:default:mysql-8-4"
+        context = {"aws:RequestedRegion": "ap-southeast-1"}
+        # RDS authorizes each supplied/default resource, including the option
+        # group, even though Terraform does not create that AWS-owned group.
+        for resource in (group, "arn:aws:rds:ap-southeast-1:111122223333:db:retail-lab-mysql",
+                         "arn:aws:rds:ap-southeast-1:111122223333:subgrp:retail-lab-mysql",
+                         "arn:aws:rds:ap-southeast-1:111122223333:pg:retail-mysql84-offline"):
+            self.assertEqual(decision(statements, "rds:CreateDBInstance", resource, context), "allowed")
+        for other in (group.replace("111122223333", "999988887777"), group.replace("mysql-8-4", "mysql-8-0"),
+                      group.replace("mysql-8-4", "postgres-17"), group.replace("ap-southeast-1", "us-east-1")):
+            with self.subTest(resource=other):
+                self.assertEqual(decision(statements, "rds:CreateDBInstance", other, context), "implicitDeny")
+        self.assertEqual(decision(statements, "rds:CreateDBInstance", group,
+                                  {"aws:RequestedRegion": "us-east-1"}), "implicitDeny")
+        for action in ("rds:ModifyOptionGroup", "rds:DeleteOptionGroup", "rds:DeleteDBInstance"):
+            self.assertEqual(decision(statements, action, group, context), "implicitDeny")
+
+    def test_account_plan_gate_can_only_read_at_the_global_endpoint_and_cannot_upgrade(self):
+        statements = [item for part in self.parts for item in part["Statement"]]
+        self.assertEqual(decision(statements, "freetier:GetAccountPlanState", "*",
+                                  {"aws:RequestedRegion": "us-east-1"}), "allowed")
+        for region in ("ap-southeast-1", "us-west-2", None):
+            context = {} if region is None else {"aws:RequestedRegion": region}
+            self.assertEqual(decision(statements, "freetier:GetAccountPlanState", "*", context), "implicitDeny")
+        for region in ("us-east-1", "ap-southeast-1"):
+            self.assertEqual(decision(statements, "freetier:UpgradeAccountPlan", "*",
+                                      {"aws:RequestedRegion": region}), "implicitDeny")
 
     def test_managed_policy_attachments_cannot_use_administrator_access(self):
         for action in ("iam:AttachRolePolicy", "iam:DetachRolePolicy"):

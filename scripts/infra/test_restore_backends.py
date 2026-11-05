@@ -148,6 +148,31 @@ class RestorePlanTests(unittest.TestCase):
             restore.verify_tags([{"Key": "RetailDrill", "Value": "someone-else"}], plan)
         restore.verify_tags(restore.tags(plan), plan)
 
+    def test_cleanup_replay_after_all_owned_resources_are_gone_is_read_only(self):
+        plan, report = reviewed_plan(), {'changed': False}
+        with patch.object(restore, 'isolated_group', return_value=None), \
+                patch.object(restore, 'existing_backend', return_value=None), patch.object(ops, 'aws') as api:
+            restore.execute(target(), plan, plan['plan_sha256'], 60, report, cleanup=True)
+        api.assert_not_called()
+        self.assertEqual(report['status'], 'cleaned')
+        self.assertFalse(report['changed'])
+
+    def test_cleanup_waits_for_an_already_deleting_backend_without_second_delete(self):
+        plan, report = reviewed_plan(), {'changed': False}
+        with patch.object(restore, 'isolated_group', return_value='sg-drill'), \
+                patch.object(restore, 'existing_backend', return_value={'DBInstanceStatus': 'deleting'}), \
+                patch.object(restore, 'wait_backend') as wait, patch.object(ops, 'aws') as api:
+            restore.execute(target(), plan, plan['plan_sha256'], 60, report, cleanup=True)
+        wait.assert_called_once_with(plan, 'sg-drill', 60, deleted=True)
+        self.assertEqual(api.call_args.args[:2], ('ec2', 'delete-security-group'))
+        self.assertEqual(api.call_count, 1)
+
+    def test_missing_drill_group_is_allowed_only_for_explicit_cleanup(self):
+        with patch.object(ops, 'aws', return_value={'SecurityGroups': []}):
+            self.assertIsNone(restore.isolated_group(reviewed_plan(), missing_ok=True))
+            with self.assertRaises(ops.OpsError):
+                restore.isolated_group(reviewed_plan())
+
     def test_redis_request_keeps_tls_acl_and_no_live_identifier(self):
         plan = reviewed_plan()
         plan.update(kind="redis", engine_version="7.1", user_groups=["retail-checkout"], instance_class="cache.t4g.small")
@@ -168,6 +193,8 @@ class RestorePlanTests(unittest.TestCase):
                     source_etag="etag", configmap_digests={"fixture": ops.configmap_digest(configmap)})
         def kube(arguments, namespace=None):
             if arguments[1] == "namespace":
+                return {}
+            if arguments[1] == "networkpolicy":
                 return {}
             if arguments[1] == "backup.velero.io":
                 return {"metadata": {"uid": "backup-uid"}, "status": {"phase": "Completed"}}
@@ -194,6 +221,25 @@ class RestorePlanTests(unittest.TestCase):
         with patch.object(restore, "kube_delete") as delete, self.assertRaises(ops.OpsError):
             restore.velero_drill(selected, plan, 60, cleanup=True)
         delete.assert_not_called()
+
+    def test_velero_resume_recreates_missing_isolation_before_restore(self):
+        selected = target()
+        plan = dict(reviewed_plan(), kind='velero', source_backup='backup', source_uid='uid',
+                    source_archive='sha', source_etag='etag', configmap_digests={'fixture': 'digest'})
+        expected = {'retail.aws/drill': plan['operation_id'], 'retail.aws/plan': plan['plan_sha256']}
+        def kube(arguments, namespace=None):
+            if arguments[1] == 'namespace':
+                return {'metadata': {'annotations': expected}}
+            if arguments[1] == 'backup.velero.io':
+                return {'metadata': {'uid': 'uid'}, 'status': {'phase': 'Completed'}}
+            return {}
+        selected.kube = kube
+        with patch.object(ops, 'backup_archive', return_value={'sha256': 'sha', 'etag': 'etag'}), \
+                patch.object(restore, 'kube_create', side_effect=RuntimeError('stop after isolation')) as create:
+            with self.assertRaises(RuntimeError):
+                restore.velero_drill(selected, plan, 60)
+        self.assertEqual(create.call_args.args[1]['kind'], 'NetworkPolicy')
+        self.assertEqual(create.call_args.args[1]['spec']['policyTypes'], ['Ingress', 'Egress'])
 
 
 if __name__ == "__main__":

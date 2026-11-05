@@ -72,6 +72,96 @@ run "reuse_existing_opensearch_role" {
   }
 }
 
+run "architecture_capacity_includes_all_environments" {
+  command = apply
+  variables { deployment_profile = "architecture" }
+  assert {
+    condition     = toset(keys(aws_eks_node_group.role)) == toset(["management", "dev", "prod"])
+    error_message = "The architecture profile must retain management, dev and prod groups."
+  }
+  assert {
+    condition = (
+      aws_launch_template.nodes["management"].instance_type == "m6i.xlarge" &&
+      aws_launch_template.nodes["dev"].instance_type == "m6i.large" &&
+      aws_db_instance.mysql.instance_class == "db.t4g.small" &&
+      aws_db_instance.mysql.allocated_storage == 30 && aws_db_instance.mysql.backup_retention_period == 7 &&
+      aws_db_instance.mysql.deletion_protection && !aws_db_instance.mysql.skip_final_snapshot &&
+      length(aws_secretsmanager_secret.application) == 12 && length(aws_secretsmanager_secret.monitoring) == 5 &&
+      alltrue([for secret in aws_secretsmanager_secret.application : secret.recovery_window_in_days == 7]) &&
+      alltrue([for secret in aws_secretsmanager_secret.monitoring : secret.recovery_window_in_days == 7]) &&
+      jsondecode(aws_cloudformation_stack.managed_backends.template_body).Resources.RabbitMQ.Properties.HostInstanceType == "mq.m7g.large" &&
+      jsondecode(aws_cloudformation_stack.managed_backends.template_body).Resources.RabbitMQ.Properties.DeploymentMode == "CLUSTER_MULTI_AZ" &&
+      length(jsondecode(aws_cloudformation_stack.managed_backends.template_body).Resources.RabbitMQ.Properties.SubnetIds) == 3 &&
+      jsondecode(aws_cloudformation_stack.managed_backends.template_body).Resources.Search.Properties.EBSOptions.VolumeSize == 50
+    )
+    error_message = "The architecture profile must preserve the original sizing, backups, deletion guards and three-subnet broker."
+  }
+}
+
+run "default_lab_is_small_and_disposable" {
+  command = apply
+  assert {
+    condition = (
+      output.deployment_profile == "lab" && toset(keys(aws_eks_node_group.role)) == toset(["management", "dev"]) &&
+      alltrue([for template in aws_launch_template.nodes : template.instance_type == "m7i-flex.large"]) &&
+      alltrue([for group in aws_eks_node_group.role : group.scaling_config[0].desired_size == 1 && group.scaling_config[0].max_size == 1]) &&
+      aws_db_instance.mysql.instance_class == "db.t4g.micro" && aws_db_instance.mysql.allocated_storage == 20 &&
+      aws_db_instance.mysql.backup_retention_period == 1 && !aws_db_instance.mysql.multi_az &&
+      !aws_db_instance.mysql.deletion_protection && aws_db_instance.mysql.skip_final_snapshot &&
+      length(aws_secretsmanager_secret.application) == 12 && length(aws_secretsmanager_secret.monitoring) == 5 &&
+      alltrue([for secret in aws_secretsmanager_secret.application : secret.recovery_window_in_days == 0]) &&
+      alltrue([for secret in aws_secretsmanager_secret.monitoring : secret.recovery_window_in_days == 0]) &&
+      jsondecode(aws_cloudformation_stack.managed_backends.template_body).Resources.RabbitMQ.Properties.HostInstanceType == "mq.m7g.medium" &&
+      jsondecode(aws_cloudformation_stack.managed_backends.template_body).Resources.RabbitMQ.Properties.DeploymentMode == "SINGLE_INSTANCE" &&
+      length(jsondecode(aws_cloudformation_stack.managed_backends.template_body).Resources.RabbitMQ.Properties.SubnetIds) == 1 &&
+      jsondecode(aws_cloudformation_stack.managed_backends.template_body).Resources.Search.Properties.EBSOptions.VolumeSize == 10 &&
+      jsondecode(aws_cloudformation_stack.managed_backends.template_body).Resources.Redis.Properties.CacheNodeType == "cache.t4g.small"
+    )
+    error_message = "Lab must keep two small amd64 workers, disposable small RDS and a one-subnet broker without changing Redis."
+  }
+}
+
+run "reject_an_unknown_deployment_profile" {
+  command = plan
+  variables { deployment_profile = "production" }
+  expect_failures = [var.deployment_profile]
+}
+
+run "lab_cannot_enable_production_workers" {
+  command = plan
+  variables { deploy_production_node_group = true }
+  expect_failures = [var.deploy_production_node_group]
+}
+
+run "lab_cannot_expand_mysql" {
+  command = plan
+  variables { mysql_instance_class = "db.t4g.small" }
+  expect_failures = [var.mysql_instance_class]
+}
+
+run "dev_only_capacity_omits_production_workers" {
+  command = plan
+  variables { deploy_production_node_group = false }
+  assert {
+    condition = alltrue([
+      toset(keys(aws_eks_node_group.role)) == toset(["management", "dev"]),
+      toset(keys(aws_launch_template.nodes)) == toset(["management", "dev"]),
+      toset(keys(aws_autoscaling_group_tag.discovery)) == toset(["management", "dev"]),
+      toset(keys(aws_autoscaling_group_tag.enabled)) == toset(["management", "dev"]),
+    ])
+    error_message = "A dev-only deployment must omit production workers and their launch template/autoscaler tags."
+  }
+  assert {
+    condition = (
+      aws_eks_node_group.role["management"].node_group_name == "management" &&
+      aws_eks_node_group.role["dev"].node_group_name == "dev" &&
+      aws_eks_node_group.role["management"].scaling_config[0].desired_size == 1 &&
+      aws_eks_node_group.role["dev"].scaling_config[0].desired_size == 1
+    )
+    error_message = "Dev-only mode must preserve the existing management/dev addresses, group names and initial capacity."
+  }
+}
+
 run "reuse_legacy_elasticsearch_role" {
   command = plan
 

@@ -3,10 +3,10 @@ name: Retail Ansible
 on:
   pull_request:
     branches: [main]
-    paths: ["ansible/**", "scripts/infra/**", ".github/workflows/ansible.yml"]
+    paths: ["ansible/**", "scripts/infra/**", "scripts/setup-controller.sh", ".github/workflows/ansible.yml"]
   push:
     branches: [main]
-    paths: ["ansible/**", "scripts/infra/**", ".github/workflows/ansible.yml"]
+    paths: ["ansible/**", "scripts/infra/**", "scripts/setup-controller.sh", ".github/workflows/ansible.yml"]
   workflow_dispatch:
 
 permissions:
@@ -51,6 +51,10 @@ jobs:
         run: ansible-galaxy collection install -r requirements.yml -p .collections
       - name: Test the target, candidate and bootstrap guards without AWS
         run: python -B -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Check the local controller installer without downloading or installing tools
+        run: |
+          bash -n ../scripts/setup-controller.sh
+          python -B -m unittest discover -s ../scripts/infra -p 'test_controller_setup.py' -v
       - name: Lint playbooks and roles
         run: ansible-lint --offline
       - name: Check all playbook syntax

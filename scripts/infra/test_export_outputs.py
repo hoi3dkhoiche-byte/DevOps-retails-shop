@@ -21,6 +21,19 @@ def outputs():
 
 
 class DeploymentOutputTests(unittest.TestCase):
+    def test_optional_profile_is_preserved_and_rejects_unknown_or_sensitive_values(self):
+        for profile in ("lab", "architecture"):
+            value = outputs()
+            value["deployment_profile"] = {"sensitive": False, "type": "string", "value": profile}
+            self.assertEqual(export_outputs.export(value)["deployment_profile"], value["deployment_profile"])
+        for entry in ({"sensitive": False, "type": "string", "value": "production"},
+                      {"sensitive": True, "type": "string", "value": "lab"},
+                      {"sensitive": False, "type": "number", "value": 1}):
+            value = outputs()
+            value["deployment_profile"] = entry
+            with self.subTest(entry=entry), self.assertRaises(ValueError):
+                export_outputs.export(value)
+
     def test_optional_gateway_endpoint_is_exported_with_the_real_terraform_name(self):
         value = outputs()
         value["s3_gateway_endpoint_id"] = {"sensitive": False, "type": "string", "value": "vpce-0123456789abcdef0"}

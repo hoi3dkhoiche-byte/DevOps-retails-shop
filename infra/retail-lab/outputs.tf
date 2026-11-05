@@ -1,4 +1,5 @@
 output "cluster_name" { value = aws_eks_cluster.retail.name }
+output "deployment_profile" { value = var.deployment_profile }
 output "cluster_endpoint" { value = aws_eks_cluster.retail.endpoint }
 output "vpc_id" { value = aws_vpc.retail.id }
 output "s3_gateway_endpoint_id" { value = aws_vpc_endpoint.s3.id }

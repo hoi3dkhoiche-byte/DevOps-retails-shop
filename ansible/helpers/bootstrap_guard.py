@@ -70,7 +70,7 @@ def validate_checkout(repo: Path) -> None:
             "GitOps checkout differs from the current remote main; fetch and reconcile before bootstrap")
 
 
-def build_contract(repo: Path, account: str, region: str, cluster: str) -> dict:
+def build_contract(repo: Path, account: str, region: str, cluster: str, deployment_profile: str | None = None) -> dict:
     config = read_mapping(repo / "config.yaml")
     versions = read_mapping(repo / "versions.yaml")
     root = read_mapping(repo / "argocd" / "retail-root.yaml")
@@ -83,6 +83,10 @@ def build_contract(repo: Path, account: str, region: str, cluster: str) -> dict:
     require(config.get("gitopsRepo") == GITOPS_REPO and config.get("sourceRepo") == SOURCE_REPO,
             "GitOps configuration points to an unexpected project repository")
     require(config.get("gitopsRevision") == "main", "Bootstrap requires the reviewed GitOps main revision")
+    profile = config.get("deploymentProfile", "architecture")
+    require(isinstance(profile, str) and profile in {"lab", "architecture"}, "Invalid GitOps deployment profile")
+    require(deployment_profile is None or profile == deployment_profile,
+            "GitOps deployment profile differs from the checked Terraform outputs")
     validate_root(root, config)
     charts = {}
     for chart in ("external-secrets", "argo-cd"):
@@ -94,7 +98,12 @@ def build_contract(repo: Path, account: str, region: str, cluster: str) -> dict:
                 f"Invalid chart pin: {chart}")
         values = repo / "platform" / f"{chart}.yaml"
         require(values.is_file(), f"Missing chart values: {values}")
-        charts[chart] = {**pin, "values_file": str(values)}
+        value_files = [str(values)]
+        if profile == "lab":
+            overlay = repo / "profiles/lab" / f"{chart}.yaml"
+            require(overlay.is_file(), f"Missing lab chart overlay: {chart}")
+            value_files.append(str(overlay))
+        charts[chart] = {**pin, "values_file": str(values), "values_files": value_files}
     expected_secrets = ["argocd-admin", "argocd-redis"]
     if config.get("repositoryCredentials", {}).get("enabled") is True:
         expected_secrets.append("argocd-repositories")
@@ -102,10 +111,16 @@ def build_contract(repo: Path, account: str, region: str, cluster: str) -> dict:
         {"repoURL": charts["external-secrets"]["repository"], "chart": "external-secrets",
          "targetRevision": str(charts["external-secrets"]["version"]),
          "helm": {"releaseName": "external-secrets", "skipTests": True,
-                  "valueFiles": ["$values/platform/external-secrets.yaml"]}},
+                  "valueFiles": ["$values/" + Path(path).relative_to(repo).as_posix()
+                                 for path in charts["external-secrets"]["values_files"]]}},
         {"repoURL": config["gitopsRepo"], "targetRevision": config["gitopsRevision"], "ref": "values"},
     ]
+    platform_applications = ["argo-rollouts", "aws-load-balancer-controller", "external-secrets", "metrics-server",
+                             "kube-prometheus-stack"]
+    if profile == "architecture":
+        platform_applications += ["cluster-autoscaler", "loki", "alloy", "velero"]
     return {"config": config, "versions": versions, "root": root, "charts": charts,
+            "deployment_profile": profile, "platform_applications": platform_applications,
             "expected_external_secrets": expected_secrets, "eso_sources": eso_sources}
 
 
@@ -115,10 +130,12 @@ def main() -> int:
     parser.add_argument("--account-id", required=True)
     parser.add_argument("--region", required=True)
     parser.add_argument("--cluster-name", required=True)
+    parser.add_argument("--deployment-profile", choices=("lab", "architecture"))
     args = parser.parse_args()
     try:
         validate_checkout(args.gitops_dir.resolve())
-        contract = build_contract(args.gitops_dir.resolve(), args.account_id, args.region, args.cluster_name)
+        contract = build_contract(args.gitops_dir.resolve(), args.account_id, args.region, args.cluster_name,
+                                  args.deployment_profile)
         print(json.dumps(contract))
     except (ValueError, OSError, subprocess.SubprocessError, yaml.YAMLError) as error:
         print(f"Bootstrap guard: {error}", file=sys.stderr)

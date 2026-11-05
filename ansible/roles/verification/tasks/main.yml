@@ -20,6 +20,8 @@
       - "{{ retail_region }}"
       - --cluster-name
       - "{{ retail_cluster_name }}"
+      - --deployment-profile
+      - "{{ retail_target.deployment_profile }}"
   register: verification_verification_guard
   changed_when: false
 
@@ -72,7 +74,7 @@
   delay: 5
   loop: >-
     {{ ['retail-root', 'retail-argocd-secrets', 'retail-platform-resources', 'retail-dev-configuration']
-       + (verification_verification_contract.versions.keys() | reject('equalto', 'argo-cd') | list) }}
+       + verification_verification_contract.platform_applications }}
 
 - name: Wait for all five dev Applications to synchronize
   kubernetes.core.k8s_info:

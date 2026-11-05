@@ -153,10 +153,12 @@ def verify_tags(values, plan):
                 "ownership_mismatch", "Refusing a drill resource with different ownership tags")
 
 
-def isolated_group(plan, create=False, report=None):
+def isolated_group(plan, create=False, report=None, missing_ok=False):
     groups = ops.aws("ec2", "describe-security-groups", "--filters", "Name=vpc-id,Values=" + plan["vpc_id"],
                      "Name=group-name,Values=" + plan["target_name"]).get("SecurityGroups", [])
     if not groups:
+        if missing_ok and not create:
+            return None
         ops.require(create, "missing_drill", "The drill security group does not exist")
         if report is not None:
             report["changed"] = True
@@ -289,7 +291,19 @@ def velero_drill(target, plan, timeout, cleanup=False, report=None):
         if report is not None:
             report["changed"] = True
         kube_create(target, {"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": name, "annotations": expected}})
-        kube_create(target, {"apiVersion": "networking.k8s.io/v1", "kind": "NetworkPolicy", "metadata": {"name": "deny-all", "namespace": name},
+    # Reconcile isolation independently of Namespace creation: a previous attempt
+    # may have stopped between creating the namespace and creating its policy.
+    isolation = target.kube(["get", "networkpolicy", "deny-all", "--ignore-not-found", "-o", "json"], name)
+    if isolation:
+        spec = isolation.get('spec', {})
+        ops.require(spec.get('podSelector') == {} and set(spec.get('policyTypes', [])) == {'Ingress', 'Egress'}
+                    and not spec.get('ingress') and not spec.get('egress'),
+                    'unsafe_isolation', 'The drill namespace isolation policy has changed')
+    else:
+        if report is not None:
+            report['changed'] = True
+        kube_create(target, {"apiVersion": "networking.k8s.io/v1", "kind": "NetworkPolicy",
+                             "metadata": {"name": "deny-all", "namespace": name, "annotations": expected},
                              "spec": {"podSelector": {}, "policyTypes": ["Ingress", "Egress"]}})
     current = target.kube(["get", "restore.velero.io", name, "--ignore-not-found", "-o", "json"], "velero")
     document = {"apiVersion": "velero.io/v1", "kind": "Restore", "metadata": {"name": name, "namespace": "velero", "annotations": expected},
@@ -332,18 +346,21 @@ def execute(target, plan, approved, timeout, report, cleanup=False):
             live = plan_drill(target, plan["kind"], plan["operation_id"], plan["source_backup"])
             ops.require(all(live.get(key) == value for key, value in plan.items() if key not in {"created_at", "plan_sha256"}),
                         "source_changed", "Restore source or topology changed after plan review")
-        group = isolated_group(plan, create=not cleanup, report=report)
+        group = isolated_group(plan, create=not cleanup, report=report, missing_ok=cleanup)
         existing = existing_backend(plan)
         if cleanup:
             if existing:
-                report["changed"] = True
-                if plan["kind"] == "rds":
-                    ops.aws("rds", "delete-db-instance", "--db-instance-identifier", plan["target_name"], "--skip-final-snapshot", "--delete-automated-backups")
-                else:
-                    ops.aws("elasticache", "delete-replication-group", "--replication-group-id", plan["target_name"], "--no-retain-primary-cluster")
+                status = existing.get('DBInstanceStatus' if plan['kind'] == 'rds' else 'Status')
+                if status != 'deleting':
+                    report["changed"] = True
+                    if plan["kind"] == "rds":
+                        ops.aws("rds", "delete-db-instance", "--db-instance-identifier", plan["target_name"], "--skip-final-snapshot", "--delete-automated-backups")
+                    else:
+                        ops.aws("elasticache", "delete-replication-group", "--replication-group-id", plan["target_name"], "--no-retain-primary-cluster")
                 wait_backend(plan, group, timeout, deleted=True)
-            report["changed"] = True
-            ops.aws("ec2", "delete-security-group", "--group-id", group)
+            if group:
+                report["changed"] = True
+                ops.aws("ec2", "delete-security-group", "--group-id", group)
         else:
             if not existing:
                 report["changed"] = True

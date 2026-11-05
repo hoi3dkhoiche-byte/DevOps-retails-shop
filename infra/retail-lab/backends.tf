@@ -14,9 +14,9 @@ resource "aws_db_instance" "mysql" {
   identifier                      = "retail-lab-mysql"
   engine                          = "mysql"
   engine_version                  = "8.4.11"
-  instance_class                  = var.mysql_instance_class
-  allocated_storage               = 30
-  max_allocated_storage           = 100
+  instance_class                  = local.mysql_instance_class
+  allocated_storage               = local.mysql_storage_gib
+  max_allocated_storage           = local.lab_profile ? 0 : 100
   storage_type                    = "gp3"
   storage_encrypted               = true
   username                        = "retailadmin"
@@ -26,13 +26,13 @@ resource "aws_db_instance" "mysql" {
   parameter_group_name            = aws_db_parameter_group.mysql.name
   publicly_accessible             = false
   multi_az                        = var.mysql_multi_az
-  backup_retention_period         = 7
+  backup_retention_period         = local.mysql_backup_days
   backup_window                   = "18:00-19:00"
   maintenance_window              = "sun:19:00-sun:20:00"
   auto_minor_version_upgrade      = false
-  deletion_protection             = true
-  skip_final_snapshot             = false
-  final_snapshot_identifier       = "retail-lab-mysql-final"
+  deletion_protection             = !local.lab_profile
+  skip_final_snapshot             = local.lab_profile
+  final_snapshot_identifier       = local.lab_profile ? null : "retail-lab-mysql-final"
   enabled_cloudwatch_logs_exports = ["error", "slowquery"]
 }
 
@@ -45,7 +45,7 @@ locals {
 resource "aws_secretsmanager_secret" "application" {
   for_each                = local.application_secrets
   name                    = each.key
-  recovery_window_in_days = 7
+  recovery_window_in_days = local.lab_profile ? 0 : 7
 }
 
 # CloudFormation resolves Secrets Manager references server-side. Password values
@@ -71,11 +71,11 @@ resource "aws_cloudformation_stack" "managed_backends" {
           BrokerName              = "retail-lab-rabbitmq"
           EngineType              = "RABBITMQ"
           EngineVersion           = "4.2"
-          HostInstanceType        = "mq.m7g.large"
-          DeploymentMode          = "CLUSTER_MULTI_AZ"
+          HostInstanceType        = local.mq_instance_type
+          DeploymentMode          = local.mq_deployment_mode
           PubliclyAccessible      = false
           AutoMinorVersionUpgrade = true
-          SubnetIds               = aws_subnet.data[*].id
+          SubnetIds               = [for index in local.mq_subnet_indices : aws_subnet.data[index].id]
           SecurityGroups          = [aws_security_group.mq.id]
           Logs                    = { General = true }
           Users = [{
@@ -128,7 +128,7 @@ resource "aws_cloudformation_stack" "managed_backends" {
         Properties = {
           DomainName              = "retail-lab-search", EngineVersion = "OpenSearch_3.3"
           ClusterConfig           = { InstanceType = "r8g.medium.search", InstanceCount = 1, ZoneAwarenessEnabled = false }
-          EBSOptions              = { EBSEnabled = true, VolumeType = "gp3", VolumeSize = 50 }
+          EBSOptions              = { EBSEnabled = true, VolumeType = "gp3", VolumeSize = local.search_volume_gib }
           VPCOptions              = { SubnetIds = [aws_subnet.data[0].id], SecurityGroupIds = [aws_security_group.backends["search"].id] }
           EncryptionAtRestOptions = { Enabled = true }, NodeToNodeEncryptionOptions = { Enabled = true }
           DomainEndpointOptions   = { EnforceHTTPS = true, TLSSecurityPolicy = "Policy-Min-TLS-1-2-2019-07" }
@@ -151,21 +151,25 @@ resource "aws_cloudformation_stack" "managed_backends" {
   })
 }
 
+locals {
+  data_bucket_names = toset(["logs", "backup"])
+}
+
 resource "aws_s3_bucket" "data" {
-  for_each = toset(["logs", "backup"])
+  for_each = local.data_bucket_names
   bucket   = "retail-lab-${data.aws_caller_identity.current.account_id}-${each.value}"
 }
 resource "aws_s3_bucket_public_access_block" "data" {
-  for_each                = aws_s3_bucket.data
-  bucket                  = each.value.id
+  for_each                = local.data_bucket_names
+  bucket                  = aws_s3_bucket.data[each.key].id
   block_public_acls       = true
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
 }
 resource "aws_s3_bucket_server_side_encryption_configuration" "data" {
-  for_each = aws_s3_bucket.data
-  bucket   = each.value.id
+  for_each = local.data_bucket_names
+  bucket   = aws_s3_bucket.data[each.key].id
   rule {
     apply_server_side_encryption_by_default {
       sse_algorithm = "AES256"
@@ -173,8 +177,8 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "data" {
   }
 }
 resource "aws_s3_bucket_lifecycle_configuration" "data" {
-  for_each = aws_s3_bucket.data
-  bucket   = each.value.id
+  for_each = local.data_bucket_names
+  bucket   = aws_s3_bucket.data[each.key].id
   rule {
     id     = "abort-incomplete-uploads"
     status = "Enabled"

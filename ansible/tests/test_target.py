@@ -164,6 +164,27 @@ class TargetTests(unittest.TestCase):
         self.write_receipt()
         self.assertEqual(self.run_check()["account_id"], ACCOUNT)
 
+    def test_optional_deployment_profile_is_validated_and_handed_to_bootstrap(self):
+        self.assertEqual(self.run_check()["deployment_profile"], "architecture")
+        for profile in ("lab", "architecture"):
+            for entry in (profile, {"sensitive": False, "type": "string", "value": profile}):
+                self.outputs["deployment_profile"] = entry
+                self.write_outputs()
+                self.receipt["outputs_sha256"] = self.checksum()
+                self.write_receipt()
+                with self.subTest(profile=profile, native=isinstance(entry, dict)):
+                    self.assertEqual(self.run_check()["deployment_profile"], profile)
+
+    def test_invalid_or_sensitive_profile_is_refused_before_aws(self):
+        for entry in (False, None, "lean", {"sensitive": True, "type": "string", "value": "lab"},
+                      {"sensitive": False, "type": "bool", "value": "lab"}):
+            self.outputs["deployment_profile"] = entry
+            self.write_outputs()
+            self.commands.clear()
+            with self.subTest(entry=entry):
+                self.assert_error("invalid_outputs")
+                self.assertEqual(self.commands, [])
+
     def test_changed_output_checksum_stops_before_aws(self):
         self.output.write_bytes(self.output.read_bytes() + b" ")
         self.assert_error("checksum_mismatch")

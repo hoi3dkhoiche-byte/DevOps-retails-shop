@@ -7,8 +7,10 @@ import sys
 from types import SimpleNamespace
 import unittest
 from unittest.mock import MagicMock, Mock, patch
+from urllib.parse import unquote, urlsplit
 
 import rotate_credentials as rotation
+import bootstrap_backends as bootstrap
 from test_runner import outputs
 
 TOKEN = '123e4567-e89b-42d3-a456-426614174000'
@@ -98,6 +100,11 @@ class Adapter:
     def finalize(self, selection, current):
         self.passwords = {current['password']}
 
+    def rollback(self, selection, original, rejected):
+        self.apply(selection, original, rejected)
+        if selection['backend'] in {'mysql', 'redis'}:
+            self.finalize(selection, original)
+
 
 class RotationTests(unittest.TestCase):
     def run_rotation(self, backend='mysql', service='catalog', env='dev', maintenance=False):
@@ -127,6 +134,22 @@ class RotationTests(unittest.TestCase):
         self.assertTrue(report['old_password_retained'])
         self.assertNotIn(OLD, json.dumps(report))
         self.assertTrue(all('/prod/' in name for name in store.names))
+
+    def test_opensearch_rotation_uses_complex_password_and_reuses_it_on_resume(self):
+        with patch.object(bootstrap.secrets, 'choice', side_effect=lambda alphabet: alphabet[0]), \
+                patch.object(bootstrap.secrets, 'randbelow', return_value=0):
+            selection, store, adapter, _ = self.run_rotation(backend='opensearch', maintenance=True)
+        arn = next(iter(store.values))
+        value = store.values[arn][TOKEN]['password']
+        self.assertTrue(len(value) == 48)
+        self.assertTrue(any(character.isupper() for character in value))
+        self.assertTrue(any(character.islower() for character in value))
+        self.assertTrue(any(character.isdigit() for character in value))
+        self.assertTrue(any(not character.isalnum() for character in value))
+        before = copy.deepcopy(store.values)
+        with patch.object(rotation, 'generate_password', side_effect=AssertionError('Unexpected password regeneration')):
+            rotation.rotate(outputs(), store, adapter, selection, execute=True, maintenance=True)
+        self.assertTrue(before == store.values, 'Resume must keep the staged password')
 
     def test_all_mysql_services_are_supported_but_invalid_cross_backend_is_rejected(self):
         for service in ('catalog', 'cart', 'orders'):
@@ -189,7 +212,9 @@ class RotationTests(unittest.TestCase):
         self.assertIn('AWSCURRENT', store.labels[application]['old-version-1'])
         result = rotation.rotate(outputs(), store, adapter, selection, execute=True)
         self.assertEqual(result['status'], 'success')
-        self.assertIn(store.values[platform][TOKEN]['password'], store.values[application][TOKEN]['url'])
+        self.assertTrue(store.values[platform][TOKEN]['password'] ==
+                        unquote(urlsplit(store.values[application][TOKEN]['url']).password),
+                        'The Redis URI must decode to the same password as the platform secret')
         self.assertEqual(len(adapter.applies), 1)
 
     def test_redis_can_rollback_if_only_platform_pending_was_staged(self):
@@ -208,6 +233,8 @@ class RotationTests(unittest.TestCase):
         self.assertNotIn('AWSPENDING', store.labels[platform][TOKEN])
         self.assertNotIn(TOKEN, store.values[application])
         self.assertEqual(adapter.applies, [])
+        self.assertTrue(all(any('RETAIL_ROLLED_BACK' in labels for labels in stages.values())
+                            for stages in store.labels.values()))
 
     def test_rollback_restores_the_exact_previous_single_password_and_secret_version(self):
         selection, store, adapter, _ = self.run_rotation(backend='rabbitmq', service='orders', maintenance=True)
@@ -218,6 +245,69 @@ class RotationTests(unittest.TestCase):
         self.assertTrue(result['rollback'])
         with self.assertRaisesRegex(rotation.RotationError, 'operation_already_rolled_back'):
             rotation.rotate(outputs(), store, adapter, selection, execute=True, maintenance=True)
+
+    def test_dual_password_rollback_retires_failed_password_and_cannot_be_resumed_forward(self):
+        for backend, service in (('mysql', 'catalog'), ('redis', 'checkout')):
+            with self.subTest(backend=backend):
+                selection, store, adapter, _ = self.run_rotation(backend=backend, service=service)
+                failed = store.values[next(iter(store.values))][TOKEN]['password']
+                self.assertIn(OLD, adapter.passwords, 'The old secondary password is still accepted before rollback')
+                result = rotation.rotate(outputs(), store, adapter, selection, execute=True, rollback=True)
+                self.assertEqual(adapter.passwords, {OLD})
+                self.assertNotIn(failed, adapter.passwords)
+                self.assertFalse(result['old_password_retained'])
+                for arn, stages in store.labels.items():
+                    self.assertIn('RETAIL_ROLLED_BACK', stages[TOKEN])
+                with self.assertRaisesRegex(rotation.RotationError, 'operation_already_rolled_back'):
+                    rotation.rotate(outputs(), store, adapter, selection, execute=True)
+                again = rotation.rotate(outputs(), store, adapter, selection, execute=True, rollback=True)
+                self.assertFalse(again['changed'])
+
+    def test_mysql_primary_is_restored_so_a_later_rotation_keeps_consumers_password(self):
+        class PrimaryAdapter(Adapter):
+            def __init__(self):
+                super().__init__()
+                self.primary, self.secondary = OLD, None
+
+            def apply(self, selection, desired, previous):
+                self.applies.append(copy.deepcopy(selection))
+                self.secondary, self.primary = self.primary, desired['password']
+                self.passwords = {self.primary, self.secondary}
+
+            def finalize(self, selection, current):
+                self.secondary = None
+                self.passwords = {self.primary}
+
+        selection = rotation.target('dev', 'catalog', 'mysql', TOKEN)
+        store, adapter = Store(selection), PrimaryAdapter()
+        rotation.rotate(outputs(), store, adapter, selection, execute=True)
+        self.assertNotEqual(adapter.primary, OLD)
+        rotation.rotate(outputs(), store, adapter, selection, execute=True, rollback=True)
+        self.assertEqual(adapter.primary, OLD)
+        next_selection = dict(selection, operation_id='123e4567-e89b-42d3-a456-426614174001')
+        rotation.rotate(outputs(), store, adapter, next_selection, execute=True)
+        self.assertIn(OLD, adapter.passwords, 'A later rotation must retain the password consumers use after rollback')
+
+    def test_rollback_does_not_publish_if_failed_password_remains_authorized(self):
+        selection, store, adapter, _ = self.run_rotation()
+        with patch.object(adapter, 'rollback'), self.assertRaisesRegex(rotation.RotationError, 'rolled_back_password_still_accepted'):
+            rotation.rotate(outputs(), store, adapter, selection, execute=True, rollback=True)
+        arn = next(iter(store.values))
+        self.assertIn('AWSCURRENT', store.labels[arn][TOKEN])
+
+    def test_lost_rollback_response_resumes_without_reapplying_backend_change(self):
+        selection, store, adapter, _ = self.run_rotation()
+        original = adapter.rollback
+        def lost_response(*args):
+            original(*args)
+            raise RuntimeError('fixture response lost')
+        with patch.object(adapter, 'rollback', side_effect=lost_response), self.assertRaises(RuntimeError):
+            rotation.rotate(outputs(), store, adapter, selection, execute=True, rollback=True)
+        self.assertEqual(adapter.passwords, {OLD})
+        with patch.object(adapter, 'rollback', side_effect=AssertionError('unnecessary repeated rollback')):
+            report = rotation.rotate(outputs(), store, adapter, selection, execute=True, rollback=True)
+        self.assertEqual(report['status'], 'success')
+        self.assertIn('AWSCURRENT', next(iter(store.labels.values()))['old-version-0'])
 
     def test_third_party_version_conflict_is_never_overwritten(self):
         selection, store, adapter, _ = self.run_rotation()
@@ -329,6 +419,29 @@ class RotationTests(unittest.TestCase):
         self.assertNotIn(desired['password'], sql)
         self.assertEqual(arguments, ('catalog_dev', desired['password']))
         connection.close.assert_called_once()
+
+    def test_mysql_rollback_restores_primary_then_discards_the_rejected_secondary(self):
+        client = Mock()
+        client.get_secret_value.return_value = {'SecretString': json.dumps({'username': 'admin', 'password': OLD})}
+        adapter = rotation.PrivateBackends(outputs(), client, Mock(), Mock())
+        reset, discard = MagicMock(), MagicMock()
+        original = {'username': 'catalog_dev', 'password': OLD}
+        with patch.object(adapter, 'mysql', side_effect=[reset, discard]), patch.object(adapter, 'check', return_value=True):
+            adapter.rollback(rotation.target('dev', 'catalog', 'mysql', TOKEN), original, {'password': 'failed-new'})
+        first = reset.cursor.return_value.__enter__.return_value.execute.call_args.args
+        last = discard.cursor.return_value.__enter__.return_value.execute.call_args.args
+        self.assertIn('RETAIN CURRENT PASSWORD', first[0])
+        self.assertEqual(first[1], ('catalog_dev', OLD))
+        self.assertIn('DISCARD OLD PASSWORD', last[0])
+        self.assertEqual(last[1], ('catalog_dev',))
+        self.assertNotIn(OLD, first[0])
+
+    def test_redis_rollback_replaces_password_set_with_original_only(self):
+        elasticache = Mock()
+        elasticache.describe_users.return_value = {'Users': [{'Status': 'active'}]}
+        adapter = rotation.PrivateBackends(outputs(), Mock(), elasticache, Mock())
+        adapter.rollback(rotation.target('dev', 'checkout', 'redis', TOKEN), {'password': OLD}, {'password': 'failed-new'})
+        elasticache.modify_user.assert_called_once_with(UserId='retail-checkout-dev', Passwords=[OLD])
 
     def test_search_password_patch_preserves_role_mapping(self):
         client = Mock()

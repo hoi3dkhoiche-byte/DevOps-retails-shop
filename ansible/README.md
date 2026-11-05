@@ -10,6 +10,8 @@ Dùng Linux x86_64 với Python 3.12, hoặc Ubuntu trong WSL2. Ansible controll
 
 Cần Git, AWS CLI v2, kubectl tương thích EKS 1.36 và Helm 3.19.0 trong PATH. AWS CLI dùng phiên đăng nhập ngắn hạn của operator đã được EKS access entry cho phép; không đặt access key/password trong inventory. Helm và kubectl phải cài trên cùng controller Linux, không dùng file `.exe` từ workspace Windows.
 
+[Bộ chuẩn bị controller](../docs/CONTROLLER_SETUP.md) có `scripts/setup-controller.sh --check` mặc định chỉ đọc, `--install-tools` cài CLI/toolchain đã pin vào workspace, và `--install` thêm Ansible khi Python venv đã sẵn sàng. Có thể dùng `aws login` qua browser sau khi cài; bước cài công cụ không tự đăng nhập hoặc gọi API AWS.
+
 Từ thư mục gốc source:
 
 ```bash
@@ -55,7 +57,11 @@ Các lệnh dưới chạy từ `ansible/`, sau khi activate venv. Mỗi playboo
 
 `init-platform` tạo ARN cần điền vào Terraform input trước plan đầu tiên. Helper tái sử dụng credential hiện có, không tự xoay password mỗi lần chạy. Vì API hiện chưa trả thông tin create/reuse, task này báo `changed` một cách bảo thủ; không xem recap đó là bằng chứng đã thay password.
 
+Nếu lần dọn lab trước đã đưa bốn platform Secret vào lịch xóa, mặc định `init-platform` dừng. Sau khi kiểm tra đúng account/tên Secret và chủ đích giữ lại credential, có thể chạy lại với `-e '{"retail_restore_scheduled_platform_secrets": true}'`. Boolean này mặc định false, chỉ thêm opt-in `--restore-scheduled-platform-secrets` cho đúng bốn tên platform đã cố định; không khôi phục app Secret hoặc xoay password ngầm. Phiên operator cần quyền RestoreSecret tương ứng.
+
 Receipt từ workflow Terraform ràng buộc output với SHA256, account, run/attempt và **source commit của infrastructure**. Checkout source đúng commit ghi trong `metadata.json` trước bước 5; commit này có thể khác commit image ứng dụng. Nếu lấy output thủ công, phải chủ động đặt boolean `retail_require_output_receipt: false`; account/endpoint/live EKS vẫn được kiểm tra, receipt lỗi có sẵn vẫn bị từ chối. Không tắt receipt chỉ để vượt lỗi checksum.
+
+Output tùy chọn `deployment_profile` chỉ nhận string `lab` hoặc `architecture`; output cũ không có trường này giữ `architecture`. Candidate nhập nguyên metadata sang GitOps `deploymentProfile`. Bootstrap/verify từ chối profile GitOps khác Terraform, nạp overlay lab cho ESO/Argo CD và chỉ chờ những platform Application được bật trong profile. Lab giữ Prometheus/Grafana tối giản, bỏ Loki/Alloy/Velero/autoscaler và production; xem [profile GitOps](https://github.com/hoi3dkhoiche-byte/DevOps-retails-shop-gitops/blob/main/docs/deployment-profiles.md) sau khi cập nhật repo GitOps. Không dùng verify-operations/restore Velero để kết luận backup đã đạt trên profile không cài Velero.
 
 ## Review và đưa candidate vào GitOps
 

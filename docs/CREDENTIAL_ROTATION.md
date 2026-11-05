@@ -75,7 +75,7 @@ ansible-playbook rotate-credentials.yml -e @inventory/operator.yml \
 
 RabbitMQ/OpenSearch vẫn yêu cầu maintenance acknowledgement khi rollback. Helper kiểm lại version current chỉ thuộc operation/gốc rồi khôi phục backend và version AWS gốc; không dùng một `AWSPREVIOUS` bất kỳ đã bị operation khác thay thế. Tiếp tục ESO + GitOps secretRevision mới + acceptance như khi rotate. UUID đã rollback không được dùng để phát hành lại; operation mới dùng UUID mới sau khi giải quyết toàn bộ pending state.
 
-MySQL/Redis giữ hai password trong cửa sổ chuyển tiếp, nên rollback version AWS không đồng nghĩa đã thu hồi password mới. Giữ cửa sổ rollback ngắn và review quyền truy cập version cũ trong Secrets Manager.
+Rollback không chỉ chuyển staging label: MySQL đặt lại password gốc làm primary rồi discard password lỗi; Redis chỉ giữ password gốc. Helper xác minh password lỗi không còn đăng nhập được trước khi đưa Secret về version gốc, ghi `RETAIL_ROLLED_BACK` và chặn dùng lại UUID đã thu hồi. Cách này giữ đúng password mà pod đang dùng khi thực hiện rotation tiếp theo. Giữ cửa sổ rollback ngắn và review quyền truy cập version cũ trong Secrets Manager.
 
 ## 6. Finalize và thu hồi password cũ
 

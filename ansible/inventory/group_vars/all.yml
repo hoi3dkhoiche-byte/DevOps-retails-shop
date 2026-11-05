@@ -19,6 +19,7 @@ retail_backend_timeout: 900
 retail_candidate_dir: "{{ retail_local_dir }}/gitops-candidate"
 retail_activate_candidate: false
 retail_preflight_phase: offline
+retail_restore_scheduled_platform_secrets: false
 
 # Operational actions are plans/read-only checks until explicitly enabled.
 retail_rotation_environment: dev

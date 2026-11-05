@@ -3,6 +3,7 @@
   ansible.builtin.assert:
     that:
       - not ansible_check_mode
+      - retail_restore_scheduled_platform_secrets is boolean
     fail_msg: Platform credential initialization changes AWS; run without --check after reviewing the target.
 
 - name: Create the private local artifact directory
@@ -13,12 +14,10 @@
 
 - name: Create or reuse platform credentials in Secrets Manager
   ansible.builtin.command:
-    argv:
-      - "{{ ansible_playbook_python }}"
-      - "{{ retail_source_dir }}/scripts/infra/bootstrap_backends.py"
-      - init-platform
-      - --arn-output
-      - "{{ retail_local_dir }}/platform-secret-arns.json"
+    argv: >-
+      {{ [ansible_playbook_python, retail_source_dir ~ '/scripts/infra/bootstrap_backends.py',
+          'init-platform', '--arn-output', retail_local_dir ~ '/platform-secret-arns.json']
+         + (['--restore-scheduled-platform-secrets'] if retail_restore_scheduled_platform_secrets else []) }}
     chdir: "{{ retail_source_dir }}"
   environment: "{{ retail_aws_environment }}"
   register: platform_credentials_platform_credentials_command

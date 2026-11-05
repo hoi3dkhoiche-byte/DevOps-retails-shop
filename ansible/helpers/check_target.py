@@ -94,6 +94,8 @@ def offline(args):
     require(isinstance(config.get("gitopsRevision"), str)
             and re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z/_.-]*", config["gitopsRevision"]) is not None,
             "invalid_metadata", "GitOps revision must be a nonempty string")
+    require(config.get("deploymentProfile", "architecture") in ("lab", "architecture"),
+            "invalid_metadata", "GitOps deployment profile must be lab or architecture")
     for key in ("deployment", "repositoryCredentials"):
         require(isinstance(config.get(key), dict) and type(config[key].get("enabled")) is bool,
                 "invalid_metadata", "GitOps feature switches must be explicit booleans")
@@ -174,6 +176,18 @@ def verify_receipt(args, outputs):
     return receipt
 
 
+def output_deployment_profile(path):
+    values = json_object(path.read_text(encoding="utf-8-sig"), "Terraform outputs")
+    profile = values.get("deployment_profile", "architecture")
+    if isinstance(profile, dict):
+        require(profile.get("sensitive") is False and profile.get("type") == "string",
+                "invalid_outputs", "Deployment profile must be non-sensitive string metadata")
+        profile = profile.get("value")
+    require(isinstance(profile, str) and profile in {"lab", "architecture"},
+            "invalid_outputs", "Deployment profile must be lab or architecture")
+    return profile
+
+
 def check(args):
     result = offline(args)
     if args.phase == "offline":
@@ -188,6 +202,7 @@ def check(args):
     require(isinstance(args.kube_context, str) and bool(args.kube_context.strip()) and args.kubeconfig is not None,
             "kube_target_required", "Cluster preflight requires an explicit kubeconfig and context")
     outputs = load_outputs(args.source_dir.resolve(), args.terraform_output)
+    profile = output_deployment_profile(args.terraform_output)
     require(outputs["account_id"] == expected, "wrong_account", "Terraform outputs belong to a different AWS account")
     receipt = verify_receipt(args, outputs)
     check_identity(expected)
@@ -202,7 +217,8 @@ def check(args):
     require(cluster.get("endpoint") == outputs["cluster_endpoint"],
             "endpoint_mismatch", "The live EKS API endpoint differs from Terraform outputs")
     result.update(cluster_endpoint=outputs["cluster_endpoint"], kube_context=args.kube_context,
-                  kubeconfig=str(args.kubeconfig.resolve()), outputs_receipt_verified=receipt is not None)
+                  kubeconfig=str(args.kubeconfig.resolve()), outputs_receipt_verified=receipt is not None,
+                  deployment_profile=profile)
     if receipt is not None:
         result.update(source_commit=receipt["source_commit"], terraform_run_id=receipt["run_id"],
                       terraform_run_attempt=receipt["run_attempt"])

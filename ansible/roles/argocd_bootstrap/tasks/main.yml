@@ -20,6 +20,8 @@
       - "{{ retail_region }}"
       - --cluster-name
       - "{{ retail_cluster_name }}"
+      - --deployment-profile
+      - "{{ retail_target.deployment_profile }}"
   register: argocd_bootstrap_bootstrap_guard
   changed_when: false
 
@@ -151,8 +153,7 @@
     chart_version: "{{ argocd_bootstrap_bootstrap_contract.charts['external-secrets'].version }}"
     release_namespace: external-secrets
     create_namespace: true
-    values_files:
-      - "{{ argocd_bootstrap_bootstrap_contract.charts['external-secrets'].values_file }}"
+    values_files: "{{ argocd_bootstrap_bootstrap_contract.charts['external-secrets'].values_files }}"
     wait: true
     timeout: 15m
   environment: "{{ retail_aws_environment }}"
@@ -268,8 +269,7 @@
     chart_version: "{{ argocd_bootstrap_bootstrap_contract.charts['argo-cd'].version }}"
     release_namespace: argocd
     create_namespace: true
-    values_files:
-      - "{{ argocd_bootstrap_bootstrap_contract.charts['argo-cd'].values_file }}"
+    values_files: "{{ argocd_bootstrap_bootstrap_contract.charts['argo-cd'].values_files }}"
     wait: true
     timeout: 15m
   environment: "{{ retail_aws_environment }}"

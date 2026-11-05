@@ -15,7 +15,7 @@ REQUIRED = {
     "orders_security_group_id", "buckets", "certificate_arn", "admin_cidrs", "domain",
     "application_secret_arns", "platform_secret_arns", "monitoring_secret_arns", "terraform_role_arn",
 }
-ALLOWED = REQUIRED | {"public_subnet_ids", "s3_gateway_endpoint_id"}
+ALLOWED = REQUIRED | {"public_subnet_ids", "s3_gateway_endpoint_id", "deployment_profile"}
 FORBIDDEN = {"password", "secretstring", "secret_string", "secret_access_key", "aws_access_key_id",
              "aws_secret_access_key", "aws_session_token", "session_token", "token", "private_key",
              "tls_private_key", "authorization", ".dockerconfigjson"}
@@ -56,6 +56,10 @@ def export(values):
     require(isinstance(account, str) and re.fullmatch(r"[0-9]{12}", account) is not None,
             "Invalid deployment account ID")
     require(result["cluster_name"]["value"] == "retail-lab-eks", "Unexpected deployment cluster")
+    if "deployment_profile" in result:
+        profile = result["deployment_profile"]
+        require(profile["type"] == "string" and isinstance(profile["value"], str)
+                and profile["value"] in {"lab", "architecture"}, "Invalid deployment profile")
     endpoint = urlsplit(result["cluster_endpoint"]["value"])
     require(endpoint.scheme == "https" and endpoint.hostname is not None and endpoint.path in ("", "/")
             and not endpoint.query and not endpoint.fragment

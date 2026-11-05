@@ -72,14 +72,45 @@ variable "hosted_zone_id" {
   default = ""
 }
 
+variable "deployment_profile" {
+  description = "lab is a short-lived dev environment; architecture preserves the full design. Review replacements/data loss before changing an existing deployment."
+  type        = string
+  default     = "lab"
+  nullable    = false
+  validation {
+    condition     = contains(["lab", "architecture"], var.deployment_profile)
+    error_message = "deployment_profile must be lab or architecture."
+  }
+}
+
 variable "mysql_instance_class" {
-  type    = string
-  default = "db.t4g.small"
+  description = "Optional architecture-profile override. The lab profile uses db.t4g.micro."
+  type        = string
+  default     = null
+  validation {
+    condition     = var.deployment_profile == "architecture" || var.mysql_instance_class == null || var.mysql_instance_class == "db.t4g.micro"
+    error_message = "The lab profile requires db.t4g.micro; use architecture for a reviewed override."
+  }
 }
 
 variable "mysql_multi_az" {
-  type    = bool
-  default = false
+  type     = bool
+  default  = false
+  nullable = false
+  validation {
+    condition     = var.deployment_profile == "architecture" || !var.mysql_multi_az
+    error_message = "The lab profile uses a Single-AZ database."
+  }
+}
+
+variable "deploy_production_node_group" {
+  description = "Defaults to false for lab and true for architecture. Only architecture can enable production workers; disabling an existing group destroys its workers."
+  type        = bool
+  default     = null
+  validation {
+    condition     = var.deployment_profile == "architecture" || var.deploy_production_node_group == null || var.deploy_production_node_group == false
+    error_message = "Production workers require the architecture profile."
+  }
 }
 
 variable "create_opensearch_service_linked_role" {
@@ -103,14 +134,30 @@ locals {
     "172.16.0.0/12", "192.0.0.0/24", "192.0.2.0/24", "192.88.99.0/24", "192.168.0.0/16",
     "198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24", "224.0.0.0/4", "240.0.0.0/4",
   ]
-  name         = "retail-lab-eks"
-  azs          = ["ap-southeast-1a", "ap-southeast-1b", "ap-southeast-1c"]
-  public_cidrs = ["10.0.10.0/24", "10.0.20.0/24", "10.0.30.0/24"]
-  app_cidrs    = ["10.0.40.0/22", "10.0.60.0/22", "10.0.80.0/22"]
-  data_cidrs   = ["10.0.100.0/24", "10.0.110.0/24", "10.0.120.0/24"]
-  groups = {
+  name                 = "retail-lab-eks"
+  azs                  = ["ap-southeast-1a", "ap-southeast-1b", "ap-southeast-1c"]
+  public_cidrs         = ["10.0.10.0/24", "10.0.20.0/24", "10.0.30.0/24"]
+  app_cidrs            = ["10.0.40.0/22", "10.0.60.0/22", "10.0.80.0/22"]
+  data_cidrs           = ["10.0.100.0/24", "10.0.110.0/24", "10.0.120.0/24"]
+  lab_profile          = var.deployment_profile == "lab"
+  production_workers   = var.deploy_production_node_group == null ? !local.lab_profile : var.deploy_production_node_group
+  mysql_instance_class = var.mysql_instance_class == null ? (local.lab_profile ? "db.t4g.micro" : "db.t4g.small") : var.mysql_instance_class
+  mysql_storage_gib    = local.lab_profile ? 20 : 30
+  mysql_backup_days    = local.lab_profile ? 1 : 7
+  mq_instance_type     = local.lab_profile ? "mq.m7g.medium" : "mq.m7g.large"
+  mq_deployment_mode   = local.lab_profile ? "SINGLE_INSTANCE" : "CLUSTER_MULTI_AZ"
+  mq_subnet_indices    = local.lab_profile ? [0] : [0, 1, 2]
+  search_volume_gib    = local.lab_profile ? 10 : 50
+  architecture_groups = {
     management = { instance = "m6i.xlarge", disk = 80, maximum = 2, subnets = [0] }
     dev        = { instance = "m6i.large", disk = 50, maximum = 2, subnets = [0, 1, 2] }
     prod       = { instance = "m6i.large", disk = 50, maximum = 3, subnets = [0, 1, 2] }
+  }
+  lab_groups = {
+    management = { instance = "m7i-flex.large", disk = 30, maximum = 1, subnets = [0] }
+    dev        = { instance = "m7i-flex.large", disk = 30, maximum = 1, subnets = [0, 1, 2] }
+  }
+  groups = { for name, group in(local.lab_profile ? local.lab_groups : local.architecture_groups) :
+    name => group if name != "prod" || local.production_workers
   }
 }
