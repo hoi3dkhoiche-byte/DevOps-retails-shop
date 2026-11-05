@@ -2,7 +2,7 @@
 
 Ngày rà soát: 02/11/2026; cập nhật hướng lab tạm thời và cleanup AWS: 05/11/2026. Đây là kế hoạch code kèm bằng chứng chạy thật từng phần, chưa phải nghiệm thu ứng dụng.
 
-**Hướng hiện tại: dựng lab cần thiết → kiểm chứng → teardown, giữ IAM/state để tái sử dụng.** Terraform mặc định profile `lab` nhỏ và chỉ có dev; profile `architecture` giữ thiết kế đầy đủ để chọn rõ khi cần. Ansible bootstrap/kiểm tra, Argo CD đồng bộ ứng dụng. Xem [profile và vòng đời](DEV_DEPLOYMENT.md).
+**Hướng hiện tại: bật đầy đủ cấu hình; operator tự triển khai lần tiếp theo.** Terraform mặc định profile `architecture` với management/dev/prod, monitoring/logging/backup/autoscaling đầy đủ; profile `lab` nhỏ vẫn là lựa chọn tường minh. Luồng dựng → kiểm chứng → teardown, giữ IAM/state vẫn được giữ cho cả hai profile. Ansible bootstrap/kiểm tra, Argo CD đồng bộ ứng dụng. Lượt thay đổi mặc định này chỉ sửa code, chưa deploy lại AWS. Xem [profile và vòng đời](DEV_DEPLOYMENT.md) và [cấu trúc IAM policy](IAM_POLICIES.md).
 
 Tiến độ sau [đợt đối chiếu lỗi hạ tầng](INFRASTRUCTURE_REVIEW.md): đã sửa trạng thái API EKS, role OpenSearch, dependency NAT, thêm S3 Gateway Endpoint và sửa quyền RabbitMQ/bulk OpenSearch. Đã kiểm chứng 6 nhóm permission smoke trên backend thật trong fixture. Account AWS đã bootstrap nền, import IAM vào state và bắt đầu cold apply; EKS control plane cùng một phần network/IAM/S3 đã tạo, nhưng backend và ứng dụng chưa bootstrap.
 

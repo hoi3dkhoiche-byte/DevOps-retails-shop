@@ -1,6 +1,6 @@
-# Temporary lab deployment profiles
+# Deployment profiles
 
-Use `deployment_profile = "lab"` for a short create → verify → delete session. This is the default for new Terraform inputs. Select `deployment_profile = "architecture"` explicitly to retain the full original design. Merge the selected key into the complete reviewed tfvars object; neither snippet is a complete configuration:
+The default for new Terraform inputs is `deployment_profile = "architecture"`: management/dev/prod workers and the full platform graph. Choose `deployment_profile = "lab"` explicitly for a smaller create → verify → delete session. Existing explicit values in tfvars remain authoritative; changing the default does not overwrite an existing `lab` selection. Merge the selected key into the complete reviewed tfvars object; neither snippet is a complete configuration:
 
 ```json
 { "deployment_profile": "lab" }
@@ -9,6 +9,8 @@ Use `deployment_profile = "lab"` for a short create → verify → delete sessio
 ```json
 { "deployment_profile": "architecture" }
 ```
+
+The architecture platform includes Argo CD, External Secrets, AWS Load Balancer Controller, Argo Rollouts, metrics-server, Prometheus/Grafana/Alertmanager, cluster-autoscaler, Loki, Alloy and Velero. Lab overlays disable the optional components described in the maintained GitOps repository. Production infrastructure/configuration is enabled by architecture; production application images still require accepted dev digests and a reviewed promotion. Empty AWS placeholders keep GitOps deployment inactive until the operator imports real Terraform outputs. Private-repository credentials and outbound alert receivers require real operator-supplied configuration.
 
 | Component | `lab` | `architecture` |
 | --- | --- | --- |

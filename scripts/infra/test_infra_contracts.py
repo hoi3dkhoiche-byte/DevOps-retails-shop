@@ -134,7 +134,8 @@ class RegionalPreflightTests(unittest.TestCase):
         if operation == "describe-secret": return {"VersionIdsToStages": {"version-id": ["AWSCURRENT"]}}
         raise AssertionError(operation)
 
-    def test_all_regional_prerequisites_are_checked_read_only(self):
+    def test_omitted_profile_checks_full_architecture_prerequisites_read_only(self):
+        del self.config["deployment_profile"]
         with patch.object(preflight, "aws", side_effect=self.aws) as aws:
             preflight.check(self.config)
             operations = [call.args[1] for call in aws.call_args_list]
@@ -142,12 +143,17 @@ class RegionalPreflightTests(unittest.TestCase):
             self.assertIn("describe-instance-type-limits", operations)
             aws.assert_any_call("opensearch", "describe-instance-type-limits", "--engine-version", "OpenSearch_3.3",
                                 "--instance-type", "r8g.medium.search")
+            aws.assert_any_call("rds", "describe-orderable-db-instance-options", "--engine", "mysql", "--engine-version", "8.4.11",
+                                "--db-instance-class", "db.t4g.small", "--storage-type", "gp3", "--vpc")
+            aws.assert_any_call("mq", "describe-broker-instance-options", "--engine-type", "RABBITMQ",
+                                "--host-instance-type", "mq.m7g.large")
             self.assertNotIn("get-secret-value", operations)
             self.assertEqual(aws.call_args_list[0].args, ("sts", "get-caller-identity"))
             self.assertEqual(aws.call_args_list[1].args, ("freetier", "get-account-plan-state"))
             aws.assert_any_call("s3api", "head-bucket", "--bucket", "manhnguyen1131", "--expected-bucket-owner", "111122223333")
 
     def test_free_plan_stops_before_iam_state_capacity_and_version_checks_even_with_credits(self):
+        del self.config["deployment_profile"]
         def response(service, operation, *args):
             if service == "freetier":
                 return {"accountId": "111122223333", "accountPlanType": "FREE", "accountPlanStatus": "ACTIVE",

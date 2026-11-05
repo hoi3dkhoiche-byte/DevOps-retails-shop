@@ -47,7 +47,7 @@ TERRAFORM_ROOT = Path(__file__).resolve().parents[2] / "infra/retail-lab"
 
 
 def profile_settings(config):
-    name = config.get("deployment_profile", "lab")
+    name = config.get("deployment_profile", "architecture")
     if not isinstance(name, str) or name not in PROFILES:
         raise ValueError("deployment_profile must be lab or architecture")
     override = config.get("mysql_instance_class")

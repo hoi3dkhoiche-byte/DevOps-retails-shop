@@ -1,6 +1,6 @@
 # Dựng, kiểm chứng và xóa lab
 
-Profile mặc định `lab` dành cho phiên thử ngắn. Terraform tạo AWS, Ansible bootstrap/kiểm tra và Argo CD đồng bộ ứng dụng; sau khi lưu bằng chứng, teardown xóa tài nguyên lab và giữ IAM cùng bucket state. Chọn profile và giới hạn tại [DEV_DEPLOYMENT.md](DEV_DEPLOYMENT.md). Việc push code không tự dựng hoặc xóa AWS.
+Profile mặc định `architecture` bật thiết kế đầy đủ; chọn rõ `lab` nếu cần phiên thử nhỏ. Terraform tạo AWS, Ansible bootstrap/kiểm tra và Argo CD đồng bộ ứng dụng; sau khi lưu bằng chứng, luồng teardown này xóa tài nguyên project và giữ IAM cùng bucket state cho cả hai profile. Architecture giữ deletion protection/final snapshot của MySQL, nên cần xử lý đúng các bước bên dưới trước teardown. Chọn profile và giới hạn tại [DEV_DEPLOYMENT.md](DEV_DEPLOYMENT.md). Việc push code không tự dựng hoặc xóa AWS.
 
 ## Trước khi xóa
 

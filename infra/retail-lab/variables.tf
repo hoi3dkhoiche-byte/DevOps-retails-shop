@@ -73,9 +73,9 @@ variable "hosted_zone_id" {
 }
 
 variable "deployment_profile" {
-  description = "lab is a short-lived dev environment; architecture preserves the full design. Review replacements/data loss before changing an existing deployment."
+  description = "architecture enables the full design by default; choose lab explicitly for a short-lived dev environment. Review replacements/data loss before changing an existing deployment."
   type        = string
-  default     = "lab"
+  default     = "architecture"
   nullable    = false
   validation {
     condition     = contains(["lab", "architecture"], var.deployment_profile)

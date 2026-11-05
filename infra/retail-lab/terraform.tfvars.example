@@ -23,9 +23,9 @@ platform_secret_arns = {
 domain         = ""
 hosted_zone_id = ""
 
-# Recommended for create -> verify -> delete lab sessions. Explicitly choose
-# architecture to retain the original full sizing, three-AZ MQ and DB backups.
-deployment_profile = "lab"
+# Full architecture: management/dev/prod workers, three-AZ MQ and DB backups.
+# Choose lab explicitly only for the smaller create -> verify -> delete profile.
+deployment_profile = "architecture"
 # Optional architecture override; lab never creates production workers.
 # deploy_production_node_group = false
 

@@ -43,7 +43,6 @@ jobs:
   prod-pr:
     if: >-
       vars.GITOPS_ENABLED == 'true' &&
-      vars.GITOPS_PRODUCTION_ENABLED == 'true' &&
       github.event_name == 'workflow_dispatch' &&
       github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04

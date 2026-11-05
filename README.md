@@ -1,6 +1,6 @@
 # Retail AWS lab
 
-Lab mặc định dùng một EKS tại Singapore, hai worker nhỏ cho management/dev và chỉ triển khai dev theo vòng dựng → kiểm chứng → xóa. Profile `architecture` giữ thiết kế đầy đủ với management/dev/prod khi được chọn rõ. Xem [cấu hình hai profile](docs/DEV_DEPLOYMENT.md), [teardown giữ IAM/state](docs/LAB_TEARDOWN.md) và [tổng hợp thay đổi](docs/EPHEMERAL_LAB_CHANGES.md).
+Mặc định dùng profile `architecture`: một EKS tại Singapore, đủ worker management/dev/prod và toàn bộ platform monitoring, logging, backup, autoscaling. Profile `lab` gọn vẫn có thể chọn rõ cho phiên dựng → kiểm chứng → xóa. Xem [cấu hình hai profile](docs/DEV_DEPLOYMENT.md), [teardown giữ IAM/state](docs/LAB_TEARDOWN.md), [IAM policy](docs/IAM_POLICIES.md) và [tổng hợp thay đổi](docs/EPHEMERAL_LAB_CHANGES.md).
 
 [Bản đối chiếu kiến trúc hiện hành](docs/INFRASTRUCTURE_REVIEW.md) ghi rõ thành phần đang dùng và các khác biệt với ảnh `architecture.platform.png`/DOCX cũ. OpenSearch được giữ riêng theo quyết định đã chốt sau bản thiết kế.
 
@@ -13,7 +13,7 @@ Lab mặc định dùng một EKS tại Singapore, hai worker nhỏ cho manageme
 | Credential | Secrets Manager → ESO → Kubernetes Secret |
 | UI | Argo Rollouts Blue/Green; dev tự promote, prod promote thủ công |
 | CI | Build một lần, kiểm tra cùng bộ image, scan và push Docker Hub |
-| CD | PR cập nhật digest trong GitOps; production chỉ bật riêng cho architecture sau nghiệm thu dev |
+| CD | PR cập nhật digest trong GitOps; production của architecture nhận đúng bộ image đã nghiệm thu dev, sync/promote thủ công |
 
 ## Các thư mục sử dụng
 
@@ -31,7 +31,7 @@ Nếu mới có tài khoản AWS và chưa cài công cụ, bắt đầu từ [h
 
 Điền IP quản trị thực tế, account/IAM role, phiên bản EKS add-on tương thích được preflight trả về và ARN các platform secret trong cấu hình hạ tầng. Domain/ACM có thể bổ sung sau; cấu hình HTTP lab giới hạn IP đã có.
 
-Terraform create dùng plan → apply; cleanup dùng destroy-plan → destroy-apply với account/project/checksum đã review. Push/PR chỉ validate, không tự tạo AWS. Nếu đang có state/IAM hoặc Helm release cũ, kiểm kê và handoff/re-import theo runbook trước phiên dựng mới. Profile lab mới chưa được live apply; các giới hạn backend của Free plan vẫn cần nghiệm thu thật.
+Terraform create dùng plan → apply; cleanup dùng destroy-plan → destroy-apply với account/project/checksum đã review. Push/PR chỉ validate, không tự tạo AWS. Profile architecture yêu cầu account `PAID`/`ACTIVE`; code không nâng gói. Nếu đang có state/IAM hoặc Helm release cũ, kiểm kê và handoff/re-import theo runbook trước phiên dựng mới. Việc bật đủ thành phần là thay đổi cấu hình; chưa triển khai hoặc nghiệm thu lại trên AWS.
 
 Repo GitOps đã được khởi tạo. Clone repo đó và làm theo README của nó để nhập output Terraform thật, kích hoạt cấu hình và bootstrap ESO/Argo CD. Đặt `GITOPS_TOKEN` và bật Variable `GITOPS_ENABLED=true` trong repo source để CI tự tạo PR cập nhật digest. CI ứng dụng vẫn chạy khi chưa bật bước GitOps.
 

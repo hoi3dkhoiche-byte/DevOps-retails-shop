@@ -17,7 +17,7 @@ PR dev chỉ thay `environments/dev/images.yaml`. Mỗi release có nhánh autom
 
 ## Nghiệm thu dev và promote prod
 
-Lab mặc định chỉ triển khai dev. Job tạo PR production còn yêu cầu Actions Variable `GITOPS_PRODUCTION_ENABLED=true`, ngoài `GITOPS_ENABLED=true`; để trống hoặc `false` khi chạy lab tạm thời. Chỉ bật production sau khi chọn profile `architecture`, tạo worker production và nghiệm thu dev. CI ứng dụng vẫn build, test, scan và publish cùng bộ năm image; bật GitOps chỉ tạo PR, không tự dựng AWS.
+Profile mặc định `architecture` chuẩn bị đủ management/dev/prod và toàn bộ platform. Khi bật `GITOPS_ENABLED=true`, job production có thể chạy thủ công trên `main` sau khi dev được nghiệm thu; không còn cần biến riêng `GITOPS_PRODUCTION_ENABLED`. Job chỉ tạo PR bằng đúng bộ digest đã nghiệm thu, không tự apply AWS hoặc sync production. Nếu chọn profile `lab` gọn, giữ release production tắt vì profile này không có worker production. CI ứng dụng vẫn build, test, scan và publish cùng bộ năm image.
 
 `deployment_profile` (`lab`/`architecture`) điều khiển quy mô hạ tầng và platform. Nó khác `backend_profile=mysql-redis-opensearch` trong release image; hợp đồng backend và digest của năm image được giữ nguyên.
 

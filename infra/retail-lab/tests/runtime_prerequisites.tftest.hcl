@@ -72,11 +72,10 @@ run "reuse_existing_opensearch_role" {
   }
 }
 
-run "architecture_capacity_includes_all_environments" {
+run "default_architecture_capacity_includes_all_environments" {
   command = apply
-  variables { deployment_profile = "architecture" }
   assert {
-    condition     = toset(keys(aws_eks_node_group.role)) == toset(["management", "dev", "prod"])
+    condition     = output.deployment_profile == "architecture" && toset(keys(aws_eks_node_group.role)) == toset(["management", "dev", "prod"])
     error_message = "The architecture profile must retain management, dev and prod groups."
   }
   assert {
@@ -99,8 +98,9 @@ run "architecture_capacity_includes_all_environments" {
   }
 }
 
-run "default_lab_is_small_and_disposable" {
+run "explicit_lab_is_small_and_disposable" {
   command = apply
+  variables { deployment_profile = "lab" }
   assert {
     condition = (
       output.deployment_profile == "lab" && toset(keys(aws_eks_node_group.role)) == toset(["management", "dev"]) &&
@@ -132,13 +132,19 @@ run "reject_an_unknown_deployment_profile" {
 
 run "lab_cannot_enable_production_workers" {
   command = plan
-  variables { deploy_production_node_group = true }
+  variables {
+    deployment_profile           = "lab"
+    deploy_production_node_group = true
+  }
   expect_failures = [var.deploy_production_node_group]
 }
 
 run "lab_cannot_expand_mysql" {
   command = plan
-  variables { mysql_instance_class = "db.t4g.small" }
+  variables {
+    deployment_profile   = "lab"
+    mysql_instance_class = "db.t4g.small"
+  }
   expect_failures = [var.mysql_instance_class]
 }
 
