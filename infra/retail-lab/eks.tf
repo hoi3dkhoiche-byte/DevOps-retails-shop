@@ -112,9 +112,11 @@ resource "aws_eks_addon" "cni" {
   cluster_name  = aws_eks_cluster.retail.name
   addon_name    = "vpc-cni"
   addon_version = var.addon_versions.vpc_cni
-  configuration_values = jsonencode({ enableNetworkPolicy = "true", env = {
+  # Prefixes preserve normal Pod IP capacity on small Nitro lab nodes while
+  # the trunk ENI is reserved for security-group-enabled Orders Pods.
+  configuration_values = jsonencode({ enableNetworkPolicy = "true", env = merge({
     ENABLE_POD_ENI = "true", POD_SECURITY_GROUP_ENFORCING_MODE = "standard", NETWORK_POLICY_ENFORCING_MODE = "standard"
-  } })
+  }, local.lab_profile ? { ENABLE_PREFIX_DELEGATION = "true", WARM_PREFIX_TARGET = "1" } : {}) })
 }
 resource "aws_eks_addon" "base" {
   for_each                 = { coredns = var.addon_versions.coredns, kube-proxy = var.addon_versions.kube_proxy, aws-ebs-csi-driver = var.addon_versions.ebs_csi }

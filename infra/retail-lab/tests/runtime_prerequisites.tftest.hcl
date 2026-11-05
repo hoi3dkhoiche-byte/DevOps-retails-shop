@@ -83,6 +83,7 @@ run "architecture_capacity_includes_all_environments" {
     condition = (
       aws_launch_template.nodes["management"].instance_type == "m6i.xlarge" &&
       aws_launch_template.nodes["dev"].instance_type == "m6i.large" &&
+      !contains(keys(jsondecode(aws_eks_addon.cni.configuration_values).env), "ENABLE_PREFIX_DELEGATION") &&
       aws_db_instance.mysql.instance_class == "db.t4g.small" &&
       aws_db_instance.mysql.allocated_storage == 30 && aws_db_instance.mysql.backup_retention_period == 7 &&
       aws_db_instance.mysql.deletion_protection && !aws_db_instance.mysql.skip_final_snapshot &&
@@ -104,6 +105,8 @@ run "default_lab_is_small_and_disposable" {
     condition = (
       output.deployment_profile == "lab" && toset(keys(aws_eks_node_group.role)) == toset(["management", "dev"]) &&
       alltrue([for template in aws_launch_template.nodes : template.instance_type == "m7i-flex.large"]) &&
+      jsondecode(aws_eks_addon.cni.configuration_values).env.ENABLE_PREFIX_DELEGATION == "true" &&
+      jsondecode(aws_eks_addon.cni.configuration_values).env.POD_SECURITY_GROUP_ENFORCING_MODE == "standard" &&
       alltrue([for group in aws_eks_node_group.role : group.scaling_config[0].desired_size == 1 && group.scaling_config[0].max_size == 1]) &&
       aws_db_instance.mysql.instance_class == "db.t4g.micro" && aws_db_instance.mysql.allocated_storage == 20 &&
       aws_db_instance.mysql.backup_retention_period == 1 && !aws_db_instance.mysql.multi_az &&

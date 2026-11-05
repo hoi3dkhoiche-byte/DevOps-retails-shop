@@ -36,6 +36,8 @@ Policy renderer hiện tạo bốn phần CI và một `workload-boundary.json` 
 
 ## Kiểm chứng đã thực hiện
 
+Cập nhật sau chuyển sang lab tạm thời: 236 test hạ tầng WSL, 67 helper Ansible, 29 native Terraform mock, 31 test GitOps và render/budget hai profile đạt; Ansible lint, chín syntax-check và bốn workflow actionlint đạt. Các mốc dưới đây giữ lại lịch sử chẩn đoán; profile lab mới chưa được live apply trên AWS.
+
 - Đợt A–E ban đầu: 87 test Python hạ tầng, 20 native test Terraform và Alpine smoke đạt.
 - Đợt hoàn thiện vận hành ban đầu: 163 test Python hạ tầng và 60 helper test Ansible đạt trên Linux; chín playbook qua syntax-check và lint. Lượt hiện tại có **196 test hạ tầng đạt trên chính Ubuntu WSL, không skip**, gồm hồi quy dev-only node group, password, parser MQ, quyền refresh IAM và account-plan gate.
 - **25 native Terraform test** dùng provider giả lập đạt; fmt/validate và hai workflow actionlint đạt. Đây vẫn là test code, không tạo tài nguyên AWS.

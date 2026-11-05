@@ -1,6 +1,6 @@
 # Retail AWS lab
 
-Kiến trúc triển khai dùng một EKS tại Singapore, ba node group management/dev/prod và hai namespace `retail-dev`, `retail-prod`.
+Lab mặc định dùng một EKS tại Singapore, hai worker nhỏ cho management/dev và chỉ triển khai dev theo vòng dựng → kiểm chứng → xóa. Profile `architecture` giữ thiết kế đầy đủ với management/dev/prod khi được chọn rõ. Xem [cấu hình hai profile](docs/DEV_DEPLOYMENT.md), [teardown giữ IAM/state](docs/LAB_TEARDOWN.md) và [tổng hợp thay đổi](docs/EPHEMERAL_LAB_CHANGES.md).
 
 [Bản đối chiếu kiến trúc hiện hành](docs/INFRASTRUCTURE_REVIEW.md) ghi rõ thành phần đang dùng và các khác biệt với ảnh `architecture.platform.png`/DOCX cũ. OpenSearch được giữ riêng theo quyết định đã chốt sau bản thiết kế.
 
@@ -9,11 +9,11 @@ Kiến trúc triển khai dùng một EKS tại Singapore, ba node group managem
 | Catalog, Cart, Orders | Một RDS MySQL 8.4.11; database/user riêng theo service và môi trường |
 | Checkout | Redis dùng chung, tách ACL và key prefix dev/prod |
 | Tìm kiếm | OpenSearch; index và user/role riêng theo môi trường; reindex đọc Catalog SQL |
-| Sự kiện Orders | Amazon MQ RabbitMQ 4.2, cluster ba AZ, private AMQPS; outbox MySQL, confirm, retry, DLQ và chống xử lý trùng |
+| Sự kiện Orders | RabbitMQ 4.2 private AMQPS: một broker trong lab, cluster ba AZ trong architecture; giữ outbox, confirm, retry, DLQ và chống xử lý trùng |
 | Credential | Secrets Manager → ESO → Kubernetes Secret |
 | UI | Argo Rollouts Blue/Green; dev tự promote, prod promote thủ công |
 | CI | Build một lần, kiểm tra cùng bộ image, scan và push Docker Hub |
-| CD | PR cập nhật digest trong GitOps; prod dùng đúng bộ đã được nghiệm thu ở dev |
+| CD | PR cập nhật digest trong GitOps; production chỉ bật riêng cho architecture sau nghiệm thu dev |
 
 ## Các thư mục sử dụng
 
@@ -31,7 +31,7 @@ Nếu mới có tài khoản AWS và chưa cài công cụ, bắt đầu từ [h
 
 Điền IP quản trị thực tế, account/IAM role, phiên bản EKS add-on tương thích được preflight trả về và ARN các platform secret trong cấu hình hạ tầng. Domain/ACM có thể bổ sung sau; cấu hình HTTP lab giới hạn IP đã có.
 
-Terraform chạy theo hai bước riêng: tạo plan, xem diff và SHA256, sau đó mới chạy apply với plan đã xem. Nếu đang có hạ tầng/state hoặc Helm release cũ, cần kiểm kê và chuyển quyền quản lý theo hướng dẫn trước khi áp dụng; không xóa resource cũ để ép Argo CD tạo lại.
+Terraform create dùng plan → apply; cleanup dùng destroy-plan → destroy-apply với account/project/checksum đã review. Push/PR chỉ validate, không tự tạo AWS. Nếu đang có state/IAM hoặc Helm release cũ, kiểm kê và handoff/re-import theo runbook trước phiên dựng mới. Profile lab mới chưa được live apply; các giới hạn backend của Free plan vẫn cần nghiệm thu thật.
 
 Repo GitOps đã được khởi tạo. Clone repo đó và làm theo README của nó để nhập output Terraform thật, kích hoạt cấu hình và bootstrap ESO/Argo CD. Đặt `GITOPS_TOKEN` và bật Variable `GITOPS_ENABLED=true` trong repo source để CI tự tạo PR cập nhật digest. CI ứng dụng vẫn chạy khi chưa bật bước GitOps.
 

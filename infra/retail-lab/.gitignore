@@ -2,6 +2,7 @@
 *.tfstate
 *.tfstate.*
 *.tfplan
+*.local.tf
 *.tfvars
 *.tfvars.json
 !*.tfvars.example

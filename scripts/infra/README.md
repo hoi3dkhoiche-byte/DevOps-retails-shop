@@ -4,7 +4,9 @@ Current operational entrypoints are documented in the [Ansible runbook](../../an
 
 This root implements the architecture in `Thiết kế kiến trúc chi tiết.docx`, with the user's clarification that one RDS MySQL instance has separate service/environment databases and OpenSearch remains a separate search backend. It does not replace the upstream examples under `retail-store-sample-app/terraform`.
 
-The target is Singapore, EKS 1.36, three AZs and management/dev/prod node groups. Terraform owns AWS resources and the CNI, CoreDNS, kube-proxy and EBS CSI managed add-ons. Argo CD owns application/platform charts. Amazon MQ uses a private three-AZ RabbitMQ 4.2 cluster; RDS and Redis start with the specified lab capacity. EFS remains disabled until an actual shared-file workload exists.
+The target is Singapore and EKS 1.36. The default `lab` profile is a short create → verify → delete session with two small management/dev workers, no production workers, a disposable MySQL micro database and one RabbitMQ broker. The explicit `architecture` profile preserves the full worker sizing, backups and three-AZ broker. See [profile settings](../../docs/DEV_DEPLOYMENT.md) before planning. Terraform owns AWS resources/managed add-ons; Argo CD owns application/platform charts. EFS stays disabled until a shared-file workload exists.
+
+Use the reviewed [keep-IAM teardown flow](../../docs/LAB_TEARDOWN.md) after a session. It retains IAM/state, records recovery imports and works on Free/Paid accounts. Current implementation and validation are summarized in [EPHEMERAL_LAB_CHANGES.md](../../docs/EPHEMERAL_LAB_CHANGES.md). A successful offline test is not proof that the revised backend settings have passed a live Free-plan apply.
 
 ## Before the first deployment
 

@@ -191,7 +191,7 @@ def removed_hcl(manifest):
 
 
 def kube_drained(cluster, kubeconfig, context):
-    require(kubeconfig is not None and context == CLUSTER,
+    require(kubeconfig is not None and isinstance(context, str) and bool(context.strip()),
             "Cluster still exists. Use the operator controller with explicit --kubeconfig/--context after draining GitOps; hosted CI cannot bypass this gate")
     command = ["kubectl", "--kubeconfig", str(kubeconfig), "--context", context, "--request-timeout=30s"]
     selected = json.loads(invoke(command + ["config", "view", "--minify", "-o", "json"], "kube target"))
@@ -479,7 +479,7 @@ def verify(directory, account, role, confirmation, approved, local=False):
     print("Teardown source/account/run/attempt/checksum and recovery manifest verified; no AWS writes occurred.")
 
 
-def reimport(manifest_path, output, account):
+def reimport(manifest_path, output, account, include_service_linked_role=False):
     manifest = json.loads(manifest_path.read_text())
     require(manifest.get("schema_version") == 1 and manifest.get("account_id") == account and
             manifest.get("project") == PROJECT and manifest.get("state_bucket") == STATE_BUCKET,
@@ -491,6 +491,10 @@ def reimport(manifest_path, output, account):
                 "Recovery manifest may import only retained IAM/state")
         require(family(item["address"]) in source_families(), "Recovery address no longer exists in the reviewed source")
         require(isinstance(item["import_id"], str) and item["import_id"], "Missing import identity")
+        if item["type"] == "aws_iam_service_linked_role" and not include_service_linked_role:
+            # Normal fresh lab inputs reuse the account-wide role (resource count=0).
+            # Importing its old instance would conflict with that configuration.
+            continue
         declarations.append("import {\n  to = " + item["address"] + "\n  id = " + json.dumps(item["import_id"]) + "\n}\n")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text("\n".join(declarations), encoding="utf-8")
@@ -529,10 +533,13 @@ def guard_create(plan, account):
                 existing = optional_aws("iam", "get-role-policy", "--role-name", value["role"],
                                         "--policy-name", value["name"], missing=("NoSuchEntity",))
         elif kind == "aws_iam_role_policy_attachment":
-            result = optional_aws("iam", "list-attached-role-policies", "--role-name", value["role"],
-                                   missing=("NoSuchEntity",))
-            existing = result and any(item.get("PolicyArn") == value.get("policy_arn")
-                                      for item in result.get("AttachedPolicies", []))
+            if not value.get("role"):
+                require(new_roles, "Unknown attachment owner without a newly-created role; import retained IAM first")
+            else:
+                result = optional_aws("iam", "list-attached-role-policies", "--role-name", value["role"],
+                                      missing=("NoSuchEntity",))
+                existing = result and any(item.get("PolicyArn") == value.get("policy_arn")
+                                          for item in result.get("AttachedPolicies", []))
         elif kind == "aws_iam_openid_connect_provider":
             # A newly-created EKS issuer can be unknown until cluster creation;
             # it has a fresh URL and does not collide with the retained old issuer.
@@ -559,6 +566,8 @@ def main():
     parser.add_argument("--local", action="store_true")
     parser.add_argument("--manifest", type=Path)
     parser.add_argument("--import-output", type=Path)
+    parser.add_argument("--include-service-linked-role", action="store_true",
+                        help="Include the retained shared role only when create_opensearch_service_linked_role=true is explicitly configured")
     parser.add_argument("--platform-secret-recovery-days", type=int, choices=(0, 7), default=7)
     parser.add_argument("--plan", type=Path)
     args = parser.parse_args()
@@ -595,7 +604,7 @@ def main():
         guard_create(json.loads(terraform(TF_ROOT, "show", "-json", str(args.plan.resolve()))), args.account_id)
     else:
         require(args.manifest is not None and args.import_output is not None, "Supply --manifest and --import-output")
-        reimport(args.manifest, args.import_output, args.account_id)
+        reimport(args.manifest, args.import_output, args.account_id, args.include_service_linked_role)
 
 
 if __name__ == "__main__":

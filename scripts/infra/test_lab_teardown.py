@@ -129,10 +129,31 @@ class RecreateTests(unittest.TestCase):
     def test_first_create_allows_computed_inline_names_for_new_roles(self):
         plan = {"resource_changes": [
             {"type": "aws_iam_role", "change": {"actions": ["create"], "after": {"name": "retail-lab-autoscaler"}}},
-            {"type": "aws_iam_role_policy", "change": {"actions": ["create"], "after": {"role": None, "name": None}}}]}
+            {"type": "aws_iam_role_policy", "change": {"actions": ["create"], "after": {"role": None, "name": None}}},
+            {"type": "aws_iam_role_policy_attachment", "change": {"actions": ["create"], "after": {"role": None, "policy_arn": "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"}}}]}
         with patch.object(teardown, "aws", return_value={"Account": ACCOUNT}), \
                 patch.object(teardown, "optional_aws", return_value=None):
             teardown.guard_create(plan, ACCOUNT)
+
+    def test_unknown_attachment_owner_without_new_role_is_rejected(self):
+        plan = {"resource_changes": [{"type": "aws_iam_role_policy_attachment", "change": {
+            "actions": ["create"], "after": {"role": None, "policy_arn": "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"}}}]}
+        with patch.object(teardown, "aws", return_value={"Account": ACCOUNT}), self.assertRaisesRegex(ValueError, "Unknown attachment owner"):
+            teardown.guard_create(plan, ACCOUNT)
+
+    def test_shared_service_role_reuse_does_not_emit_import_for_missing_count_instance(self):
+        values = inventory() + [item('aws_iam_service_linked_role.opensearch[0]', id="shared-id",
+                                    arn=f"arn:aws:iam::{ACCOUNT}:role/aws-service-role/opensearchservice.amazonaws.com/AWSServiceRoleForAmazonOpenSearchService")]
+        manifest = teardown.retained_manifest(values, ACCOUNT)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "manifest.json"
+            source.write_text(json.dumps(manifest))
+            teardown.reimport(source, root / "reuse.tf", ACCOUNT)
+            self.assertNotIn("aws_iam_service_linked_role.opensearch", (root / "reuse.tf").read_text())
+            self.assertIn("aws_iam_role.terraform", (root / "reuse.tf").read_text())
+            teardown.reimport(source, root / "manage.tf", ACCOUNT, include_service_linked_role=True)
+            self.assertIn('aws_iam_service_linked_role.opensearch[0]', (root / "manage.tf").read_text())
 
 
 class ReadinessTests(unittest.TestCase):
@@ -155,6 +176,19 @@ class ReadinessTests(unittest.TestCase):
     def test_active_cluster_requires_actual_operator_kube_context(self):
         with self.assertRaisesRegex(ValueError, "Cluster still exists"):
             teardown.kube_drained({"endpoint": "https://checked.eks.amazonaws.com"}, None, None)
+
+    def test_explicit_context_alias_is_checked_against_live_cluster_endpoint(self):
+        commands = []
+        def response(command, operation, **kwargs):
+            commands.append(command)
+            return json.dumps({"clusters": [{"cluster": {"server": "https://checked.eks.amazonaws.com"}}]}
+                              if operation == "kube target" else {"items": []})
+        with patch.object(teardown, "invoke", side_effect=response):
+            teardown.kube_drained({"endpoint": "https://checked.eks.amazonaws.com"}, Path("dedicated.yaml"), "retail-lab-eks-dev")
+        self.assertTrue(all(command[command.index("--context") + 1] == "retail-lab-eks-dev" for command in commands))
+        with patch.object(teardown, "invoke", return_value=json.dumps({"clusters": [{"cluster": {"server": "https://wrong.eks.amazonaws.com"}}]})), \
+                self.assertRaisesRegex(ValueError, "does not target"):
+            teardown.kube_drained({"endpoint": "https://checked.eks.amazonaws.com"}, Path("dedicated.yaml"), "retail-lab-eks-dev")
 
     def test_alb_or_unattached_csi_volume_blocks_before_delete(self):
         for operation, result in (("describe-load-balancers", {"LoadBalancers": [{"VpcId": "vpc-11111111"}]}),

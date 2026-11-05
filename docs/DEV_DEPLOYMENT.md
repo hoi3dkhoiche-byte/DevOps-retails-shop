@@ -24,6 +24,8 @@ Use `deployment_profile = "lab"` for a short create → verify → delete sessio
 
 Both profiles retain the existing VPC/EKS, management/dev workload labels, database/user separation and IAM resource addresses. The optional plain-string Terraform output `deployment_profile` carries the selection through the allowlisted deployment context to GitOps/Ansible. Legacy output files without that key retain `architecture` semantics. Lab profile values reject production workers, Multi-AZ MySQL and larger MySQL class overrides; select `architecture` for those reviewed changes.
 
+Lab enables VPC CNI prefix delegation on its Nitro workers so the trunk ENI used by security groups for Pods does not exhaust ordinary Pod IP capacity on the smaller nodes. Pod security groups and native network policy remain in standard mode. Existing architecture-profile CNI settings are preserved. New app subnets provide contiguous space for the required `/28` prefixes; do not enable this during an unreviewed migration of fragmented subnets. [AWS prefix-mode guidance](https://docs.aws.amazon.com/eks/latest/best-practices/prefix-mode-linux.html).
+
 The lab still uses EKS, NAT, managed backend services, S3 and their supporting resources. It is smaller than the full design; it is not a promise of zero cost or universal Free-plan eligibility. Check the actual account restrictions, regional support and pricing before a session. The one-day RDS backup setting is a candidate for the Free-plan constraint observed during the previous attempt; **this revised backend profile has not been accepted by a live apply**. Regional orderability and EC2 `FreeTierEligible` metadata do not prove that every managed backend is available under the account plan.
 
 ## Account and regional checks
