@@ -35,7 +35,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: hoi3dkhoiche-byte/DevOps-retails-shop-gitops
-          ref: a9113acc0dfe83b0dad1ec3665fd0b70133d9163
+          ref: 55029baa7a60f342b26f040771b31a8eed65c31d
           path: .ci-tools/gitops-publish
           token: ${{ secrets.SOURCE_READ_TOKEN || github.token }}
           persist-credentials: false
@@ -50,11 +50,14 @@ jobs:
       - name: Install the pinned Kubernetes collection
         run: ansible-galaxy collection install -r requirements.yml -p .collections
       - name: Test the target, candidate and bootstrap guards without AWS
-        run: python -B -m unittest discover -s tests -p 'test_*.py' -v
+        run: |
+          set -euo pipefail
+          mkdir -p ../.ci-tools/reports/ansible/helpers
+          python -B ../scripts/infra/run_tests.py --start-directory tests --name ansible-helpers --report-directory ../.ci-tools/reports/ansible/helpers 2>&1 | tee ../.ci-tools/reports/ansible/helpers/console.log
       - name: Check the local controller installer without downloading or installing tools
         run: |
           bash -n ../scripts/setup-controller.sh
-          python -B -m unittest discover -s ../scripts/infra -p 'test_controller_setup.py' -v
+          python -B ../scripts/infra/run_tests.py --start-directory ../scripts/infra --pattern test_controller_setup.py --name controller-installer --report-directory ../.ci-tools/reports/ansible/controller
       - name: Lint playbooks and roles
         run: ansible-lint --offline
       - name: Check all playbook syntax
@@ -65,3 +68,12 @@ jobs:
           done
       - name: Run the offline preflight playbook
         run: ansible-playbook preflight.yml
+      - name: Retain offline Ansible helper evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ansible-checks-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .ci-tools/reports/ansible/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14

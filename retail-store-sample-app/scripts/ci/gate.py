@@ -7,7 +7,7 @@ from pathlib import Path
 import sys
 from checks import verify as verify_source
 from e2e import junit_results
-from images import SERVICES, context, read_json, require, validate_metadata
+from images import SERVICES, context, read_json, require, validate_metadata, validate_scan_report
 from plan import select_paths
 
 
@@ -80,11 +80,7 @@ def validate_scan(summary, metadata, directory):
         require(result.get("status") == "passed" and result.get("exit_code") == 0, "Scan failed: " + service)
         require(result.get("archive_sha256") == expected["archive_sha256"]
                 and result.get("image_id") == expected["image_id"], "Scan used a different image")
-        native = read_json(directory / (service + ".json"))
-        require(native.get("SchemaVersion") == 2, "Missing/malformed native Trivy report")
-        for group in native.get("Results") or []:
-            for vulnerability in group.get("Vulnerabilities") or []:
-                require(vulnerability.get("Severity") not in {"HIGH", "CRITICAL"}, "High/critical vulnerability remains")
+        validate_scan_report(read_json(directory / (service + ".json")), expected, summary["trivy_version"])
 
 
 def main():

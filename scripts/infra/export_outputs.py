@@ -98,6 +98,21 @@ def main():
     write_private(args.output, contents)
     if metadata is not None:
         write_private(args.metadata_output, json.dumps(metadata, indent=2, sort_keys=True) + "\n")
+        if os.environ.get("GITHUB_STEP_SUMMARY"):
+            artifact = "deployment-context-" + metadata["run_id"] + "-" + metadata["run_attempt"]
+            with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a", encoding="utf-8") as target:
+                target.write("\n## Terraform → Ansible handoff\n\n"
+                    "- Infrastructure source commit: `" + metadata["source_commit"] + "`\n"
+                    "- AWS account: `" + metadata["aws_account_id"] + "`\n"
+                    "- Bootstrap artifact: `" + artifact + "`\n"
+                    "- Terraform outputs SHA256: `" + metadata["outputs_sha256"] + "`\n\n"
+                    "Download the two-file artifact on your Linux/WSL controller; use the infrastructure source commit above "
+                    "and follow `ansible/README.md`. The receipt is checked again before cluster operations.\n\n"
+                    "```bash\n"
+                    "gh run download " + metadata["run_id"] + " --repo " + metadata["repository"]
+                    + " --name " + artifact + " --dir .ci-tools/ansible\n"
+                    "```\n\n"
+                    "This workflow applied infrastructure only. Backend bootstrap, GitOps activation and production promotion remain operator-run.\n")
     print("Exported allowlisted deployment metadata; no state or credential values were included.")
 
 

@@ -417,6 +417,76 @@ class ImageContractTests(unittest.TestCase):
             self.assertEqual(image["image_id"], self.metadata["images"][service]["image_id"])
 
 
+class NativeScanIdentityTests(unittest.TestCase):
+    @staticmethod
+    def report(image_id):
+        return {"SchemaVersion": 2, "ArtifactType": "container_image", "Trivy": {"Version": "0.76.1"},
+                "Metadata": {"ImageID": image_id, "ImageConfig": {"os": "linux", "architecture": "amd64"}},
+                "Results": [{"Class": "os-pkgs", "Vulnerabilities": []}]}
+
+    def test_native_report_must_match_config_platform_and_scanner(self):
+        image = {"image_id": "sha256:" + "a" * 64}
+        native = self.report(image["image_id"])
+        images.validate_scan_report(native, image, "0.76.1")
+        changes = []
+        value = copy.deepcopy(native); value["Metadata"]["ImageID"] = "sha256:" + "b" * 64; changes.append(value)
+        value = copy.deepcopy(native); value["Metadata"]["ImageConfig"]["architecture"] = "arm64"; changes.append(value)
+        value = copy.deepcopy(native); value["Metadata"]["ImageConfig"]["os"] = "windows"; changes.append(value)
+        value = copy.deepcopy(native); value["Trivy"]["Version"] = "0.75.0"; changes.append(value)
+        value = copy.deepcopy(native); value["ArtifactType"] = "filesystem"; changes.append(value)
+        value = copy.deepcopy(native); value["Metadata"] = None; changes.append(value)
+        value = copy.deepcopy(native); value["Results"] = {}; changes.append(value)
+        value = copy.deepcopy(native); value["Results"][0]["Vulnerabilities"] = [{"Severity": "CRITICAL"}]; changes.append(value)
+        for changed in changes:
+            with self.subTest(report=changed), self.assertRaises(images.ContractError):
+                images.validate_scan_report(changed, image, "0.76.1")
+
+    def metadata(self):
+        return {"source_commit": "a" * 40, "run": {"id": "123", "attempt": "1"},
+                "images": {service: {"archive": service + ".tar", "archive_sha256": "a" * 64,
+                                     "image_id": "sha256:" + hashlib.sha256(service.encode()).hexdigest()}
+                           for service in images.SERVICES}}
+
+    def test_successful_scanner_exit_cannot_hide_wrong_native_image(self):
+        metadata, scans = self.metadata(), []
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+
+            def scanner(arguments, **kwargs):
+                if arguments == ["trivy", "--version"]:
+                    return "Version: 0.76.1\n"
+                service = Path(arguments[arguments.index("--output") + 1]).stem
+                scans.append(service)
+                native = self.report(metadata["images"][service]["image_id"])
+                if service == "ui":
+                    native["Metadata"]["ImageID"] = "sha256:" + "f" * 64
+                (directory / "scan" / (service + ".json")).write_text(json.dumps(native), encoding="utf-8")
+                return ""
+
+            with mock.patch.dict(os.environ, {"TRIVY_VERSION": "0.76.1"}), \
+                 mock.patch.object(images, "verify", return_value=metadata), mock.patch.object(images, "run", side_effect=scanner):
+                with self.assertRaisesRegex(images.ContractError, "ui"):
+                    images.scan(directory)
+            self.assertEqual(set(scans), set(images.SERVICES))
+            summary = images.read_json(directory / "scan/summary.json")
+            self.assertEqual(summary["images"]["ui"]["status"], "failed")
+            self.assertEqual(summary["images"]["catalog"]["status"], "passed")
+
+    def test_required_gate_revalidates_native_image_after_artifact_download(self):
+        metadata = self.metadata()
+        summary = {"source_commit": metadata["source_commit"], "run": metadata["run"], "trivy_version": "0.76.1",
+                   "images": {service: dict(image, status="passed", exit_code=0) for service, image in metadata["images"].items()}}
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.dict(os.environ, {"TRIVY_VERSION": "0.76.1"}):
+            directory = Path(temporary)
+            for service, image in metadata["images"].items():
+                (directory / (service + ".json")).write_text(json.dumps(self.report(image["image_id"])), encoding="utf-8")
+            gate.validate_scan(summary, metadata, directory)
+            wrong = self.report(metadata["images"]["catalog"]["image_id"])
+            (directory / "ui.json").write_text(json.dumps(wrong), encoding="utf-8")
+            with self.assertRaisesRegex(images.ContractError, "different image"):
+                gate.validate_scan(summary, metadata, directory)
+
+
 class NativeReportRevalidationTests(unittest.TestCase):
     def test_passed_summary_cannot_hide_skipped_or_different_native_xml(self):
         with tempfile.TemporaryDirectory() as temporary:

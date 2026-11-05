@@ -266,6 +266,33 @@ def build(directory):
     verify(directory)
 
 
+def validate_scan_report(native, image, version):
+    """Bind scanner-native evidence to the same image that was built and tested."""
+    require(isinstance(native, dict) and native.get("SchemaVersion") == 2,
+            "Missing/malformed native Trivy report")
+    require(native.get("ArtifactType") == "container_image", "Trivy did not scan a container image")
+    scanner = native.get("Trivy")
+    require(isinstance(scanner, dict) and scanner.get("Version") == version,
+            "Native Trivy report used a different scanner version")
+    metadata = native.get("Metadata")
+    require(isinstance(metadata, dict) and metadata.get("ImageID") == image["image_id"],
+            "Native Trivy report scanned a different image config")
+    config = metadata.get("ImageConfig")
+    require(isinstance(config, dict) and config.get("os") == "linux" and config.get("architecture") == "amd64",
+            "Native Trivy report scanned a different image platform")
+    results = native.get("Results")
+    require(results is None or isinstance(results, list), "Malformed native Trivy results")
+    for group in results or []:
+        require(isinstance(group, dict), "Malformed native Trivy result group")
+        vulnerabilities = group.get("Vulnerabilities")
+        require(vulnerabilities is None or isinstance(vulnerabilities, list), "Malformed native Trivy vulnerabilities")
+        for vulnerability in vulnerabilities or []:
+            require(isinstance(vulnerability, dict)
+                    and vulnerability.get("Severity") not in {"HIGH", "CRITICAL"},
+                    "High/critical vulnerability remains")
+    return native
+
+
 def scan(directory):
     metadata = verify(directory)
     version = os.environ.get("TRIVY_VERSION", "").removeprefix("v")
@@ -280,8 +307,9 @@ def scan(directory):
             run(["trivy", "image", "--input", directory / image["archive"], "--scanners", "vuln",
                  "--pkg-types", "os,library", "--severity", "HIGH,CRITICAL", "--exit-code", "1",
                  "--timeout", "10m", "--format", "json", "--output", reports / (service + ".json")])
+            validate_scan_report(read_json(reports / (service + ".json")), image, version)
             results[service] = {"status": "passed", "exit_code": 0}
-        except (OSError, subprocess.CalledProcessError) as error:
+        except (OSError, ValueError, subprocess.CalledProcessError) as error:
             failures.append(service)
             results[service] = {"status": "failed", "exit_code": getattr(error, "returncode", None)}
             print("Trivy failed for " + service + ": " + str(error), file=sys.stderr)

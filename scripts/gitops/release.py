@@ -227,10 +227,14 @@ def ci_release(source, event):
     return validate_release(release, run_id, attempt, sha)
 
 
-def propose(gitops, environment, release):
+def propose(gitops, environment, release, accepted=None):
     require(environment in {"dev", "prod"}, "Invalid target environment")
     validate_release(release)
     path = f"environments/{environment}/images.yaml"
+    files = {path: image_values(release)}
+    if environment == "prod":
+        validate_acceptance(accepted, release, release["source_commit"])
+        files["environments/prod/accepted.json"] = copy.deepcopy(accepted)
     current = gitops.file(path, missing_ok=True)
     require(current is not None, "Initialize the GitOps main branch from gitops/ before enabling automation")
     current_release = release_from_values(current, allow_disabled=True)
@@ -256,20 +260,23 @@ def propose(gitops, environment, release):
     reference = gitops.request("GET", "/git/ref/heads/" + branch, missing_ok=True)
     if reference:
         # Recover if a previous invocation created this branch but PR creation failed.
-        require(gitops.file(path, ref=branch) == image_values(release), "Existing automation branch contains another release")
+        require(all(gitops.file(filename, ref=branch) == value for filename, value in files.items()),
+                "Existing automation branch contains another release or acceptance proof")
         comparison = gitops.request("GET", "/compare/" + main + "..." + reference["object"]["sha"])
-        require(all(item.get("filename") == path for item in comparison.get("files", [])), "Automation branch contains other changes; preserve them for manual review")
+        require({item.get("filename") for item in comparison.get("files", [])} == set(files),
+                "Automation branch contains missing or other changes; preserve them for manual review")
     title = f"chore({environment}): deploy {release['source_commit'][:12]} (CI {release['run']['id']}/{release['run']['attempt']})"
     if not reference:
         base = gitops.request("GET", "/git/commits/" + main)
         tree = gitops.request("POST", "/git/trees", {"base_tree": base["tree"]["sha"], "tree": [{
-            "path": path, "mode": "100644", "type": "blob", "content": json_text(image_values(release))}]})
+            "path": filename, "mode": "100644", "type": "blob", "content": json_text(value)}
+            for filename, value in files.items()]})
         commit = gitops.request("POST", "/git/commits", {"message": title, "tree": tree["sha"], "parents": [main]})
         gitops.request("POST", "/git/refs", {"ref": "refs/heads/" + branch, "sha": commit["sha"]})
     body = marker + f"\nDeploy the complete five-image release from [{release['source_commit'][:12]}]({release['run']['url']}).\n\n"
     body += "Images use immutable registry digests and the mysql-redis-opensearch backend profile.\n\n"
     body += ("Merge to let Argo CD sync dev. Run the dev acceptance check before promoting this release.\n" if environment == "dev"
-             else "This is the exact image set accepted in dev. Merge, then sync production and manually promote the UI Rollout.\n")
+             else "This is the exact image set accepted in dev, with its acceptance proof preserved in environments/prod/accepted.json. Merge, then sync production and manually promote the UI Rollout.\n")
     pull = gitops.request("POST", "/pulls", {"title": title, "body": body, "head": branch, "base": "main"})
     for previous in generated:
         latest = gitops.request("GET", f"/pulls/{previous['number']}")
@@ -278,7 +285,7 @@ def propose(gitops, environment, release):
             print(f"Preserve PR {previous['number']}: it changed while the release was being proposed.")
             continue
         comparison = gitops.request("GET", "/compare/" + main + "..." + latest["head"]["sha"])
-        if all(item.get("filename") == path for item in comparison.get("files", [])):
+        if {item.get("filename") for item in comparison.get("files", [])} == set(files):
             gitops.request("PATCH", f"/pulls/{previous['number']}", {"state": "closed"})
         else:
             print(f"Preserve PR {previous['number']}: it contains additional changes.")
@@ -302,8 +309,9 @@ def main():
     else:
         require(COMMIT.fullmatch(args.expected_dev_commit), "Expected dev commit must be a full SHA")
         release = release_from_values(gitops.file("environments/dev/images.yaml"))
-        validate_acceptance(gitops.file("environments/dev/accepted.json"), release, args.expected_dev_commit)
-        propose(gitops, "prod", release)
+        accepted = gitops.file("environments/dev/accepted.json")
+        validate_acceptance(accepted, release, args.expected_dev_commit)
+        propose(gitops, "prod", release, accepted=accepted)
 
 
 if __name__ == "__main__":

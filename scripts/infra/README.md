@@ -90,6 +90,10 @@ This read credential is separate from the source workflow's `GITOPS_TOKEN`, whic
 
 ## Ownership and operational checks
 
+Terraform and Ansible CI run native Python suites through `scripts/infra/run_tests.py`. The runner retains JUnit XML plus `results.json` with discovered/executed/skipped/failure counts and workflow identity; an empty or entirely skipped suite fails. Reports are uploaded even after a failed test, retained for 14 days. Terraform fixture diagnostics retain only readiness output, permission-check results and container status, not environment values or raw backend logs. Cleanup remains limited to the disposable Compose project and has a timeout.
+
+After a successful manual apply, the workflow summary gives the infrastructure source commit, deployment-context artifact/run/attempt, output checksum and a download command for the operator's Linux/WSL controller. Bootstrap and GitOps activation remain manual. The receipt still binds the downloaded outputs to the infrastructure commit and is checked by Ansible before live cluster operations.
+
 This is a fresh target root. If upstream Terraform already owns deployed workloads or controllers, migrate state explicitly with a reviewed `removed { lifecycle { destroy = false } }`/import plan before Argo CD takes over; do not delete their state/code and apply a destructive plan. The target does not create another ALB outside the LB Controller.
 
 Default one-worker environments and one-AZ monitoring PVCs do not establish application HA. Management stays in AZ-A while its retained gp3 PVCs exist there. RabbitMQ's three-AZ cluster and quorum queues are separately configured for messaging durability. RDS backup retention is seven days and Redis snapshot retention seven days; perform actual restore/failover tests before claiming the design RPO/RTO.

@@ -64,6 +64,8 @@ Các role trong bảng được khai báo ở [eks.tf](../infra/retail-lab/eks.t
 
 Danh tính operator là người chạy AWS CLI/kubectl/Ansible. Flow hiện được hướng dẫn là IAM Console user → credential tạm thời → operator role. User/role operator cần bootstrap ngoài root Terraform, trust đúng danh tính và các quyền thao tác cần thiết; `admin_role_arn` của operator được cấp EKS access. Xem [controller setup](CONTROLLER_SETUP.md). Không đưa mật khẩu/access key vào source.
 
+Theo lựa chọn của chủ account ngày 05/11/2026, IAM user và role `retail-lab-operator` trong account `527310641616` đã được gắn AWS managed policy `AdministratorAccess`. Bốn policy `retail-lab-terraform*` chứa Explicit Deny chỉ được tháo khỏi operator; role Terraform CI tiếp tục giữ các policy này. Không gắn AdministratorAccess lên CI hoặc 14 role runtime; workload boundary vẫn giữ nguyên. Đây là cấu hình operator ngoài root Terraform, không thay template quyền của pipeline.
+
 Các service-linked role như EKS/node group, Auto Scaling, RDS, MQ, Redis, ELB và OpenSearch do AWS service sử dụng. Code tái sử dụng OpenSearch role đã tồn tại hoặc tạo khi chọn rõ biến tương ứng. Luồng teardown giữ IAM và bucket state; lần dựng sau đối chiếu manifest/import để tránh tạo trùng.
 
 | Trường JSON | Ý nghĩa |

@@ -24,6 +24,7 @@ Mặc định dùng profile `architecture`: một EKS tại Singapore, đủ wor
 - [`scripts/infra/README.md`](scripts/infra/README.md): preflight, plan/apply và bootstrap database/secret từ trong VPC.
 - [Repo GitOps](https://github.com/hoi3dkhoiche-byte/DevOps-retails-shop-gitops): cấu hình triển khai hiện hành, phiên bản platform đã khóa và hướng dẫn bootstrap. Thư mục [`gitops/`](gitops/) ở repo source là seed ban đầu.
 - [`scripts/gitops/README.md`](scripts/gitops/README.md): tự tạo PR image và nghiệm thu/promote dev → prod.
+- [`docs/CI_CD_HANDOFF.md`](docs/CI_CD_HANDOFF.md): cấu hình Actions, artifact/bằng chứng và thứ tự bàn giao triển khai thủ công.
 
 ## Trước khi triển khai
 

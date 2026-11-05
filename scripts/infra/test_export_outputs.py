@@ -93,8 +93,10 @@ class DeploymentOutputTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source, target, metadata = root / "input.json", root / "context.json", root / "metadata.json"
+            summary = root / "summary.md"
             source.write_text(json.dumps(outputs()), encoding="utf-8-sig")
-            environment = dict(os.environ, GITHUB_SHA="a" * 40, GITHUB_RUN_ID="123", GITHUB_RUN_ATTEMPT="2")
+            environment = dict(os.environ, GITHUB_SHA="a" * 40, GITHUB_RUN_ID="123", GITHUB_RUN_ATTEMPT="2",
+                               GITHUB_STEP_SUMMARY=str(summary))
             result = subprocess.run([sys.executable, str(Path(export_outputs.__file__).resolve()), "--input", str(source),
                                      "--output", str(target), "--metadata-output", str(metadata)],
                                     env=environment, text=True, capture_output=True, timeout=15)
@@ -102,6 +104,11 @@ class DeploymentOutputTests(unittest.TestCase):
             recorded = json.loads(metadata.read_text(encoding="utf-8"))
             self.assertEqual(recorded["outputs_sha256"], hashlib.sha256(target.read_bytes()).hexdigest())
             self.assertEqual((recorded["run_id"], recorded["run_attempt"]), ("123", "2"))
+            handoff = summary.read_text(encoding="utf-8")
+            self.assertIn("deployment-context-123-2", handoff)
+            self.assertIn(recorded["source_commit"], handoff)
+            self.assertIn(recorded["outputs_sha256"], handoff)
+            self.assertIn("operator-run", handoff)
 
 
 if __name__ == "__main__":

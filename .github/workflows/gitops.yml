@@ -17,9 +17,52 @@ permissions:
   actions: read
 
 jobs:
-  dev-pr:
+  configuration:
+    name: gitops-configuration
     if: >-
-      vars.GITOPS_ENABLED == 'true' &&
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository &&
+       (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch')) ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      enabled: ${{ steps.configuration.outputs.enabled }}
+    steps:
+      - name: Report GitOps setup without exposing token values
+        id: configuration
+        env:
+          GITOPS_ENABLED: ${{ vars.GITOPS_ENABLED }}
+          HAS_GITOPS_TOKEN: ${{ secrets.GITOPS_TOKEN != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '## GitOps configuration' >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$GITOPS_ENABLED" != '' && "$GITOPS_ENABLED" != 'false' && "$GITOPS_ENABLED" != 'true' ]]; then
+            echo 'GITOPS_ENABLED must be true, false, or unset.' >> "$GITHUB_STEP_SUMMARY"
+            echo '::error::GITOPS_ENABLED must be true, false, or unset.'
+            exit 1
+          fi
+          if [[ "$GITOPS_ENABLED" != 'true' ]]; then
+            echo 'enabled=false' >> "$GITHUB_OUTPUT"
+            echo 'GitOps image PR automation is disabled. Set source repository Variable GITOPS_ENABLED=true and Secret GITOPS_TOKEN to enable it. Application CI and Docker Hub publication are separate.' >> "$GITHUB_STEP_SUMMARY"
+            echo '::notice::GitOps PR automation disabled; see the configuration summary.'
+            exit 0
+          fi
+          if [[ "$HAS_GITOPS_TOKEN" != 'true' ]]; then
+            echo 'GitOps is enabled but source repository Secret GITOPS_TOKEN is missing. Use a token scoped to the GitOps repository with Contents and Pull requests read/write.' >> "$GITHUB_STEP_SUMMARY"
+            echo '::error::GITOPS_ENABLED=true requires source repository Secret GITOPS_TOKEN.'
+            exit 1
+          fi
+          echo 'enabled=true' >> "$GITHUB_OUTPUT"
+          echo 'Enable flag and token are present. The PR step will verify repository access. Production still requires a manually selected, accepted dev release; no AWS apply is triggered.' >> "$GITHUB_STEP_SUMMARY"
+
+  dev-pr:
+    needs: configuration
+    if: >-
+      needs.configuration.outputs.enabled == 'true' &&
       github.event_name == 'workflow_run' &&
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.head_branch == 'main' &&
@@ -41,8 +84,9 @@ jobs:
         run: python3 scripts/gitops/release.py dev
 
   prod-pr:
+    needs: configuration
     if: >-
-      vars.GITOPS_ENABLED == 'true' &&
+      needs.configuration.outputs.enabled == 'true' &&
       github.event_name == 'workflow_dispatch' &&
       github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04

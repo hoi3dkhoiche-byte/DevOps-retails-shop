@@ -174,6 +174,53 @@ class PromotionTests(unittest.TestCase):
             with self.subTest(proof=proof), self.assertRaises(ValueError):
                 release.validate_acceptance(proof, value, value["source_commit"])
 
+    def test_prod_pr_preserves_acceptance_with_images_in_the_same_commit(self):
+        value, github = fixture(), mock.Mock()
+        proof = acceptance(value)
+        github.file.return_value = {"release": {"enabled": False}, "images": {}}
+        github.pages.return_value = []
+
+        def request(method, path, payload=None, **kwargs):
+            if path == "/git/ref/heads/main":
+                return {"object": {"sha": "1" * 40}}
+            if path.startswith("/git/ref/heads/automation/"):
+                return None
+            if path == "/git/commits/" + "1" * 40:
+                return {"tree": {"sha": "2" * 40}}
+            if path in {"/git/trees", "/git/commits", "/git/refs"}:
+                return {"sha": "3" * 40}
+            if path == "/pulls":
+                return {"html_url": "https://github.com/" + release.GITOPS_REPO + "/pull/123"}
+            raise AssertionError((method, path))
+
+        github.request.side_effect = request
+        release.propose(github, "prod", value, accepted=proof)
+        trees = [call.args[2] for call in github.request.call_args_list if call.args[:2] == ("POST", "/git/trees")]
+        self.assertEqual(len(trees), 1)
+        files = {item["path"]: json.loads(item["content"]) for item in trees[0]["tree"]}
+        self.assertEqual(files, {"environments/prod/images.yaml": release.image_values(value),
+                                 "environments/prod/accepted.json": proof})
+        self.assertEqual(proof, acceptance(value))
+
+    def test_prod_proposal_without_dev_acceptance_does_not_call_github(self):
+        github = mock.Mock()
+        with self.assertRaisesRegex(ValueError, "acceptance"):
+            release.propose(github, "prod", fixture())
+        github.file.assert_not_called()
+        github.request.assert_not_called()
+
+    def test_recovered_prod_branch_cannot_replace_the_acceptance_proof(self):
+        value, github = fixture(), mock.Mock()
+        proof = acceptance(value)
+        changed = copy.deepcopy(proof)
+        changed["source_commit"] = "f" * 40
+        github.file.side_effect = [{"release": {"enabled": False}, "images": {}}, release.image_values(value), changed]
+        github.pages.return_value = []
+        github.request.side_effect = [{"object": {"sha": "1" * 40}}, {"object": {"sha": "2" * 40}}]
+        with self.assertRaisesRegex(ValueError, "acceptance proof"):
+            release.propose(github, "prod", value, accepted=proof)
+        self.assertTrue(all(call.args[0] == "GET" for call in github.request.call_args_list))
+
     def test_newer_merged_release_is_not_overwritten(self):
         github = mock.Mock()
         github.file.return_value = release.image_values(fixture("124"))

@@ -26,7 +26,7 @@ GitOps mặc định `deploymentProfile: architecture` và nhận metadata Terra
 
 CPU/memory được khai báo cho controller, sidecar, init và hook. Gate render chart thật tính cả Pod Prometheus do operator tạo, replica và một Pod thay thế. Bản render architecture có 26 platform Pod kể cả hook, requests 1870m CPU/4944Mi RAM, memory limits 13216Mi trước Pod thay thế. Lab có 17 Pod, requests 880m CPU/1968Mi RAM, memory limits 4384Mi. Đây là ngân sách cấu hình, không phải số liệu tải thực tế.
 
-Ansible bootstrap/verify kiểm profile khớp Terraform, nạp đúng overlay và chỉ chờ platform được bật. Helm chart version và bộ năm image theo digest được giữ nguyên. Workflow Ansible source pin GitOps commit `a9113acc0dfe83b0dad1ec3665fd0b70133d9163`; đẩy commit đó lên GitOps trước khi push source.
+Ansible bootstrap/verify kiểm profile khớp Terraform, nạp đúng overlay và chỉ chờ platform được bật. Helm chart version và bộ năm image theo digest được giữ nguyên. Mốc bật architecture dùng GitOps commit `a9113acc0dfe83b0dad1ec3665fd0b70133d9163`; các bổ sung CI/CD sau đó dùng SHA hiện hành trong `.github/workflows/ansible.yml`. Luôn đẩy GitOps trước khi push source tham chiếu SHA mới.
 
 ## CI/CD và teardown
 
