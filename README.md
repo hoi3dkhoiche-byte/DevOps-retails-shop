@@ -12,6 +12,7 @@ Mặc định dùng profile `architecture`: một EKS tại Singapore, đủ wor
 | Sự kiện Orders | RabbitMQ 4.2 private AMQPS: một broker trong lab, cluster ba AZ trong architecture; giữ outbox, confirm, retry, DLQ và chống xử lý trùng |
 | Credential | Secrets Manager → ESO → Kubernetes Secret |
 | UI | Argo Rollouts Blue/Green; dev tự promote, prod promote thủ công |
+| Truy cập web | Request/response qua ALB public; worker/Pod private trong cùng VPC; [HTTP lab và HTTPS](docs/ALB_ACCESS.md) |
 | CI | Build một lần, kiểm tra cùng bộ image, scan và push Docker Hub |
 | CD | PR cập nhật digest trong GitOps; production của architecture nhận đúng bộ image đã nghiệm thu dev, sync/promote thủ công |
 

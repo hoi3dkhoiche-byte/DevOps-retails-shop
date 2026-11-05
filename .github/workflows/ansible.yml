@@ -35,7 +35,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: hoi3dkhoiche-byte/DevOps-retails-shop-gitops
-          ref: 55029baa7a60f342b26f040771b31a8eed65c31d
+          ref: 9647f6caec9b31e17f8377f0545736559f241e81
           path: .ci-tools/gitops-publish
           token: ${{ secrets.SOURCE_READ_TOKEN || github.token }}
           persist-credentials: false

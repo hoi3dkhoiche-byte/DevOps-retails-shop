@@ -52,3 +52,5 @@ Check ổn định dùng cho bảo vệ main là `ci-required` ở source và `g
 5. Nghiệm thu chức năng dev trước promote production. Sau phiên lab, dùng [teardown giữ IAM/state](LAB_TEARDOWN.md); architecture còn deletion protection/final snapshot cần xử lý theo runbook.
 
 Không có self-hosted deploy runner hay phiên AWS/cluster được dựng thêm trong lượt cập nhật CI/CD này.
+
+Xem [đường truy cập ALB](ALB_ACCESS.md): khi chưa có domain, dev có HTTP ALB giới hạn IP quản trị; request/response của web app đi qua ALB, worker giữ trong private subnets. Production chỉ có Ingress sau khi release đã được nghiệm thu/promote.
