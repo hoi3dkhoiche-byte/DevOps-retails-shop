@@ -1,2 +1,3 @@
 .ci-tools/
 **/__pycache__/
+/docs/
