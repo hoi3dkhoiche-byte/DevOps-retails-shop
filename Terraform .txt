@@ -1,0 +1,22 @@
+Terraform 
+- Version : Khai báo phiên bản terraform(1.17.1), cấu hình S3 (bucket 	manhnguyen1131)   
+   	key: reatail/lab/terraform.tfstate
+   	default tag cho mọi resource
+- variable.tf : Định nghĩa toàn bộ biến đầu vào kèm validation rules, ip 	quản trị (admin_cidrs), ARN của IAM role operator, phiên bản EKS, 	ARN của Secrets Manager, cấu hình node group, DB , MQ, v.vvv
+- network.tf : Xấy dựng hệ thống mạng trên AWS: VPC (10.0.0.0/16), 3 	public subnet, 3 private data subnets trên 3 AZ, internet gateway, 	NAT gateway +EIP , route table , S3 gateway endpoint ( Cho loki, 	Velero kéo ảnh/log không qua NAT) và Node Security Groups.
+- eks.tf : Triển Khai EKS cluster v1.36 (retail-lab-eks), CloudWatch Log 	Group, EKS Access Entries vs Policy Association cho quyên Admin, Launch 	Templates, EKS Managed Node Groups ( gồm management, dev, prod tùy 	profile) và auto scaler tags. 
+- Backend : Triển khai hạ tầng dữ liệu (Database vs Messaging):
+    Amazon RDS MySQL 8.4 ( subnet group, parameter group, SSL ON, Quản lý      	mật khẩu qua Secret manager)
+    AWS Secrets Manager cho các microservices (dev/prod)
+    CloudFormation Stack ( retail-lab-managed-backends) triển khai Amazon 	MQ (Rabbit MQ 4.2), ElasticCache redis (User vs ACL) cà Amazon 	OpenSearch Service 3.3 (Cho catalog search).
+- iam.tf : Tạo OIDC provider cho EKS cluster và các IAM Roles for Service 	Account (IRSA): EKS CSI Driver, AWS Load Balancer controller, 	Cluster Auto scaler , ARgo Rollout, External Secrets Operation (	dev, prod, monitoring, argocd), Grafana, Loki, Velero, Bootstrap
+- monitoring - iam: Khởi tạo secrets manager cho monitoring ( grafana, 	alertmanager, argocd) và cấp quyền IAM đọc CloudWatch metrics cho 	GRafana, quyền lấy credentials cho ESO.
+- workload-boundary: Ràng buốc IAM permisions Boundary bắt buốc (reatail-	lab-workload-boundary) lên mọi role EKS/workload để đảm bảo 	CI/workload không bị leo thang đặc quyên. 
+Thư mục policy đi kèm với terraform:
+  Policies ( infra/retail-lab/policies/ ):
+	- load-balancer-controller.json: IAM policy cho AWS Load Balancer 	Controller
+	- terraform-infra.json : IAM policy cấp quyên cho Terraform 	runner/operator.
+	- workload-boundary.json: Template JSON giới hạn quyền hạn cao 	nhất cho các workload role
+  Test ( infra/retail-lab/tests/ ): 
+	- input_validation.tftest.hcl: Unit test kiểm tra validation của 	các biến terraform đầu vào.
+	- runtime_prerequisities.tftest.hcl: Native mock test cho provider 	và logic tài nguyên.

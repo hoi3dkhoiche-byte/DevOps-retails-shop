@@ -21,6 +21,7 @@ RELEASE = {"ui": "ui", "catalog": "catalog", "cart": "carts", "checkout": "check
 PORTS = {"ui": 8888, "catalog": 8081, "cart": 8082, "checkout": 8085, "orders": 8083}
 HEALTH = {"ui": "/actuator/health", "catalog": "/health", "cart": "/actuator/health",
           "checkout": "/health", "orders": "/actuator/health"}
+COMPOSE_FIXTURE_SERVICES = ("mysql", "checkout-redis", "rabbitmq", "opensearch")
 KIND_FIXTURES = {
     "mysql": {"repository": "docker.io/library/mysql", "tag": "8.4.11"},
     "rabbitmq": {"repository": "docker.io/library/rabbitmq", "tag": "4.2.0-management"},
@@ -100,21 +101,29 @@ class E2E:
         print("+ " + " ".join(args), flush=True)
         process = subprocess.Popen(args, cwd=cwd, env=self.env, stdout=subprocess.PIPE,
                                    stderr=subprocess.PIPE, text=not binary, start_new_session=True)
+        stdout = stderr = b"" if binary else ""
         try:
             stdout, stderr = process.communicate(timeout=timeout)
-        except BaseException:
+        except BaseException as error:
+            if isinstance(error, subprocess.TimeoutExpired):
+                stdout, stderr = error.output or stdout, error.stderr or stderr
             try:
                 os.killpg(process.pid, signal.SIGTERM)
-                process.communicate(timeout=10)
+                stdout, stderr = process.communicate(timeout=10)
             except subprocess.TimeoutExpired:
                 os.killpg(process.pid, signal.SIGKILL)
-                process.communicate(timeout=10)
+                stdout, stderr = process.communicate(timeout=10)
             except ProcessLookupError:
                 pass
             raise
-        if not binary:
-            with (self.report / "commands.log").open("a", encoding="utf-8") as log:
-                log.write("+ " + " ".join(args) + "\n" + stdout + stderr)
+        finally:
+            if not binary:
+                # TimeoutExpired may expose bytes even in text mode. Keep pull
+                # progress/readiness errors before propagating a failed command.
+                output = "".join(value.decode(errors="replace") if isinstance(value, bytes)
+                                 else value or "" for value in (stdout, stderr))
+                with (self.report / "commands.log").open("a", encoding="utf-8") as log:
+                    log.write("+ " + " ".join(args) + "\n" + output)
         # Cypress prints assertion failures to stdout. Preserve them in the job
         # error as well as the complete commands.log artifact.
         failure_output = stderr.decode(errors="replace") if binary else (stdout + stderr)[-16000:]
@@ -187,9 +196,40 @@ class E2E:
             require(not value.get("build") and value.get("pull_policy") == "never", "App image may build/pull")
             require(value["image"] == self.manifest["images"][service]["local_tag"], "Wrong resolved image")
         json_file(self.report / "compose.resolved.json", config)
+        self.prepare_compose_fixtures(config)
         self.started = True
-        self.run(self.compose("up", "--detach", "--no-build", "--wait", "--wait-timeout", "360"), timeout=480)
+        self.run(self.compose("up", "--detach", "--no-build", "--pull", "never",
+                              "--wait", "--wait-timeout", "360"), timeout=480)
         self.verify_compose()
+
+    def prepare_compose_fixtures(self, config):
+        services = config["services"]
+        require(set(services) == set(SERVICES) | set(COMPOSE_FIXTURE_SERVICES),
+                "Unexpected Compose fixture services")
+        app_references = {image["local_tag"] for image in self.manifest["images"].values()}
+        references = []
+        for service in COMPOSE_FIXTURE_SERVICES:
+            value = services[service]
+            reference = value.get("image")
+            require(isinstance(reference, str) and bool(reference) and not value.get("build"),
+                    "Compose fixture requires a versioned image: " + service)
+            require(":" in reference.rsplit("/", 1)[-1] and not reference.endswith(":latest"),
+                    "Compose fixture cannot use an implicit/latest image: " + service)
+            require(reference not in app_references, "Fixture cannot pull an application image: " + service)
+            references.append(reference)
+        # Image acquisition has its own bounded phase. A large fixture download
+        # must not consume the time reserved for starting and checking the stack.
+        for reference in references:
+            for attempt in range(3):
+                try:
+                    self.run(["docker", "pull", "--platform", "linux/amd64", reference], timeout=180)
+                    break
+                except (RuntimeError, subprocess.TimeoutExpired) as error:
+                    if attempt == 2:
+                        raise RuntimeError(f"Compose fixture pull failed after 3 attempts: {reference}\n{error}") from error
+                    delay = 5 * (2 ** attempt)
+                    print(f"Retrying Compose fixture {reference} in {delay}s ({attempt + 1}/3)", flush=True)
+                    time.sleep(delay)
 
     def chart_values(self, service):
         image = self.manifest["images"][service]

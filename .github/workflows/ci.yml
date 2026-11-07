@@ -250,6 +250,22 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
+      - name: Report upstream failures before downloading evidence
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+          sys.path.insert(0, "scripts/ci")
+          from gate import validate_jobs
+          needs = json.loads(os.environ["NEEDS_JSON"])
+          selected = needs.get("plan", {}).get("outputs", {}).get("any_source")
+          if needs.get("plan", {}).get("result") == "success" and selected not in {"true", "false"}:
+              raise SystemExit("Successful plan is missing an explicit any_source selection")
+          validate_jobs(needs, {"any_source": selected == "true"})
+          PY
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: plan-${{ github.run_id }}-${{ github.run_attempt }}
